@@ -88,7 +88,7 @@ static int json_parsing(const void *cdata, size_t len,
 	jtype = get_json_object(jsonObj, ARSDK_NET_DISCOVERY_KEY_TYPE);
 	if (jtype == NULL) {
 		res = -EINVAL;
-		goto error;
+		goto out;
 	}
 	typeStr = json_object_get_string(jtype);
 	info->type = strtol(typeStr, NULL, 16);
@@ -96,28 +96,25 @@ static int json_parsing(const void *cdata, size_t len,
 	jid = get_json_object(jsonObj, ARSDK_NET_DISCOVERY_KEY_ID);
 	if (jid == NULL) {
 		res = -EINVAL;
-		goto error;
+		goto out;
 	}
 	info->id = xstrdup(json_object_get_string(jid));
 
 	jname = get_json_object(jsonObj, ARSDK_NET_DISCOVERY_KEY_NAME);
 	if (jname == NULL) {
 		res = -EINVAL;
-		goto error;
+		goto out;
 	}
 	info->name = xstrdup(json_object_get_string(jname));
 
 	jport = get_json_object(jsonObj, ARSDK_NET_DISCOVERY_KEY_PORT);
 	if (jport == NULL) {
 		res = -EINVAL;
-		goto error;
+		goto out;
 	}
 	info->port = json_object_get_int(jport);
 
-	return 0;
-
-	/* Cleanup in case of error */
-error:
+out:
 	json_object_put(jsonObj);
 	return res;
 }
