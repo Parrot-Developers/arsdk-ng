@@ -27,21 +27,23 @@
 #ifndef _ARSDK_TRANSPORT_INTERNAL_H_
 #define _ARSDK_TRANSPORT_INTERNAL_H_
 
-
-/** */
+/** Data type */
 enum arsdk_transport_data_type {
 	ARSDK_TRANSPORT_DATA_TYPE_UNKNOWN = 0,
 	ARSDK_TRANSPORT_DATA_TYPE_ACK,
 	ARSDK_TRANSPORT_DATA_TYPE_NOACK,
 	ARSDK_TRANSPORT_DATA_TYPE_LOWLATENCY,
 	ARSDK_TRANSPORT_DATA_TYPE_WITHACK,
+
+	/** Maximum value ; Should not be changed. */
+	ARSDK_TRANSPORT_DATA_TYPE_MAX = 10,
 };
 
 /** */
 struct arsdk_transport_header {
 	enum arsdk_transport_data_type  type;
 	uint8_t                         id;
-	uint8_t                         seq;
+	uint16_t                        seq;
 };
 
 /** */
@@ -73,19 +75,60 @@ struct arsdk_transport_cbs {
 			void *userdata);
 };
 
-/** */
+/** Transport operations */
 struct arsdk_transport_ops {
+	/**
+	 * Disposes the transport.
+	 *
+	 * @param base : Transport base.
+	 *
+	 * @return 0 in case of success, negative errno value in case of error.
+	 */
 	int (*dispose)(struct arsdk_transport *base);
 
+	/**
+	 * Starts the transport.
+	 *
+	 * @param base : Transport base.
+	 *
+	 * @return 0 in case of success, negative errno value in case of error.
+	 */
 	int (*start)(struct arsdk_transport *base);
 
+	/**
+	 * Stops the transport.
+	 *
+	 * @param base : Transport base.
+	 *
+	 * @return 0 in case of success, negative errno value in case of error.
+	 */
 	int (*stop)(struct arsdk_transport *base);
 
+	/**
+	 * Send data by the transport.
+	 *
+	 * @param base : Transport base.
+	 * @param header : Data header.
+	 * @param payload : Data payload.
+	 * @param extra_hdr : Extra data header.
+	 * @param extra_hdrlen : Extra data header length.
+	 *
+	 * @return 0 in case of success, negative errno value in case of error.
+	 */
 	int (*send_data)(struct arsdk_transport *base,
 			const struct arsdk_transport_header *header,
 			const struct arsdk_transport_payload *payload,
 			const void *extra_hdr,
 			size_t extra_hdrlen);
+
+	/**
+	 * Retrives protocol version.
+	 *
+	 * @param base : Transport base.
+	 *
+	 * @remarks: Default implementation returns 'ARSDK_PROTOCOL_VERSION_1'.
+	 */
+	uint32_t (*get_proto_v)(struct arsdk_transport *base);
 };
 
 ARSDK_API int arsdk_transport_new(
@@ -137,6 +180,8 @@ ARSDK_API void arsdk_transport_log_cmd(
 		size_t headerlen,
 		const struct arsdk_transport_payload *payload,
 		enum arsdk_cmd_dir dir);
+
+ARSDK_API uint32_t arsdk_transport_get_proto_v(struct arsdk_transport *self);
 
 /**
  */

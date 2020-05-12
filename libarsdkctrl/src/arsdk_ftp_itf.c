@@ -33,7 +33,6 @@
 
 #ifdef BUILD_LIBMUX
 #  include <libmux.h>
-#  include <arpa/inet.h>
 #endif /* BUILD_LIBMUX */
 
 /** */

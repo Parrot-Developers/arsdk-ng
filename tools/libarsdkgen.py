@@ -47,15 +47,6 @@ def _to_c_enum(val):
 def _to_c_name(val):
     return val[0].upper() + val[1:]
 
-def _get_multiset_c_name(ftr, multiset):
-    return "struct arsdk_%s_%s" % (ftr.name.lower(), multiset.name.lower())
-
-def _get_multiset_msg_c_name(msg):
-    if msg.cls:
-        return "%s_%s_%s" % (msg.ftr.name, msg.cls.name, msg.name)
-    else:
-        return "%s_%s" % (msg.ftr.name, msg.name)
-
 def _get_arg_type_c_name(argType):
     table = {
         arsdkparser.ArArgType.I8: "int8_t",
@@ -104,21 +95,6 @@ def _get_max_args_count(ctx):
         max_count = max(count, max_count)
 
     return max_count
-
-def _get_msgs_with_multiset(msgs):
-    for msg in msgs:
-        if list(_get_args_multiset(msg.args)):
-            yield msg
-
-def _get_args_without_multiset(args):
-    for arg in args:
-        if not isinstance(arg.argType, arsdkparser.ArMultiSetting):
-            yield arg
-
-def _get_args_multiset(args):
-    for arg in args:
-        if isinstance(arg.argType, arsdkparser.ArMultiSetting):
-            yield arg
 
 #===============================================================================
 #===============================================================================
@@ -218,32 +194,6 @@ def gen_enums_h(ctx, out):
 
 #===============================================================================
 #===============================================================================
-def _gen_multiset_msg_h(ctx, out, multiset_msg):
-    out.write("\tstruct {\n")
-    out.write("\t\tuint8_t is_set;\n")
-    for arg in multiset_msg.args:
-        if isinstance(arg.argType, arsdkparser.ArEnum):
-            # FIXME: use a real enum type
-            out.write("\t\tint32_t")
-        elif isinstance(arg.argType, arsdkparser.ArBitfield):
-            out.write("\t\t%s", _get_arg_type_c_name(arg.argType.btfType))
-        else:
-            out.write("\t\t%s", _get_arg_type_c_name(arg.argType))
-        if arg.argType != arsdkparser.ArArgType.STRING:
-            out.write(" ")
-        out.write("%s;\n" % arg.name)
-    out.write("\t} %s;\n", _get_multiset_msg_c_name(multiset_msg))
-
-def gen_multisets_h(ctx, out):
-    for featureId in sorted(ctx.featuresById.keys()):
-        featureObj = ctx.featuresById[featureId]
-        for multiset in featureObj.multisets:
-            out.write(_get_multiset_c_name(featureObj, multiset)+" {\n")
-            for msg in multiset.msgs:
-                _gen_multiset_msg_h(ctx, out, msg)
-            out.write("};\n")
-#===============================================================================
-#===============================================================================
 def gen_cmd_desc_h(ctx, out):
     out.write("#define ARSDK_MAX_ARGS_COUNT %d\n", _get_max_args_count(ctx))
 
@@ -265,11 +215,6 @@ def gen_cmd_desc_h(ctx, out):
                         _to_c_name(featureObj.name),
                         _to_c_name(msgObj.name))
     out.write("extern ARSDK_API const struct arsdk_cmd_desc * const * const *g_arsdk_cmd_desc_table[];\n")
-    for featureId in sorted(ctx.featuresById.keys()):
-        featureObj = ctx.featuresById[featureId]
-        for multiset in featureObj.multisets:
-            out.write("extern const struct arsdk_cmd_desc * const g_arsdk_cmd_desc_multiset_%s_table[];\n",
-                    _to_c_name(multiset.name))
 
 #===============================================================================
 #===============================================================================
@@ -329,8 +274,6 @@ def gen_cmd_desc_c(ctx, out):
                         typestr = "ENUM"
                     elif isinstance(argObj.argType, arsdkparser.ArBitfield):
                         typestr = _to_c_enum(arsdkparser.ArArgType.TO_STRING[argObj.argType.btfType])
-                    elif isinstance(argObj.argType, arsdkparser.ArMultiSetting):
-                        typestr = "MULTISET"
                     else:
                         typestr = _to_c_enum(arsdkparser.ArArgType.TO_STRING[argObj.argType])
                     out.write("\t{\n\t\t\"%s\",\n\t\tARSDK_ARG_TYPE_%s,\n\t\t%s,\n\t\t%s\n\t},\n",
@@ -431,25 +374,6 @@ def gen_cmd_desc_c(ctx, out):
     out.write("\tNULL,\n")
     out.write("};\n\n")
 
-    # Multiset descriptions
-    for featureId in sorted(ctx.featuresById.keys()):
-        featureObj = ctx.featuresById[featureId]
-        for multiset in featureObj.multisets:
-            out.write("/*extern*/ const struct arsdk_cmd_desc * const g_arsdk_cmd_desc_multiset_%s_table[] = {\n",
-                    _to_c_name(multiset.name))
-            for msgObj in multiset.msgs:
-                if msgObj.cls:
-                    out.write("\t&g_arsdk_cmd_desc_%s_%s_%s,\n",
-                            _to_c_name(msgObj.ftr.name),
-                            _to_c_name(msgObj.cls.name),
-                            _to_c_name(msgObj.name))
-                else:
-                    out.write("\t&g_arsdk_cmd_desc_%s_%s,\n",
-                            _to_c_name(msgObj.ftr.name),
-                            _to_c_name(msgObj.name))
-            out.write("\tNULL,\n")
-            out.write("};\n\n")
-
 #===============================================================================
 #===============================================================================
 def gen_cmd_dec_h(ctx, out):
@@ -460,10 +384,7 @@ def gen_cmd_dec_h(ctx, out):
             msgName = _to_c_name(msgObj.name) if msgObj.cls == None else \
                     _to_c_name(msgObj.cls.name)+'_'+_to_c_name(msgObj.name)
 
-            if list(_get_args_multiset(msgObj.args)):
-                out.write("ARSDK_API int\n")
-            else:
-                out.write("static inline int\n")
+            out.write("static inline int\n")
             out.write("__attribute__ ((warn_unused_result))\n")
             out.write("arsdk_cmd_dec_%s_%s(\n",
                     _to_c_name(featureObj.name),
@@ -477,38 +398,21 @@ def gen_cmd_dec_h(ctx, out):
                 elif isinstance(argObj.argType, arsdkparser.ArBitfield):
                     out.write(",\n\t\t%s",
                             _get_arg_type_c_name(argObj.argType.btfType))
-                elif isinstance(argObj.argType, arsdkparser.ArMultiSetting):
-                    out.write(",\n\t\t%s",
-                            _get_multiset_c_name(featureObj, argObj.argType))
                 else:
                     out.write(",\n\t\t%s", _get_arg_type_c_name(argObj.argType))
                 if argObj.argType != arsdkparser.ArArgType.STRING:
                     out.write(" ")
                 out.write("*_%s" % argObj.name)
 
-            if list(_get_args_multiset(msgObj.args)):
-                out.write(");\n\n")
-            else:
-                out.write(") {\n")
-                out.write("\treturn arsdk_cmd_dec(cmd,\n")
-                out.write("\t\t\t&g_arsdk_cmd_desc_%s_%s",
-                        _to_c_name(featureObj.name),
-                        msgName)
-                for argObj in msgObj.args:
-                    out.write(",\n\t\t\t_%s" % argObj.name)
-                out.write(");\n")
-                out.write("}\n\n")
-
-        for msgObj in _get_msgs_with_multiset(featureObj.getMsgs()):
-            msgName = _to_c_name(msgObj.name) if msgObj.cls == None else \
-                    _to_c_name(msgObj.cls.name)+'_'+_to_c_name(msgObj.name)
-
-            out.write("ARSDK_API int arsdk_cmd_dec_%s_%s_in_cmds(\n",
-                    _to_c_name(featureObj.name), msgName)
-            out.write("\t\tconst struct arsdk_cmd *cmd,\n")
-            out.write("\t\tvoid (*cb)(const struct arsdk_cmd *cmd, "
-                    "void *userdata),\n")
-            out.write("\t\tvoid *userdata);\n\n")
+            out.write(") {\n")
+            out.write("\treturn arsdk_cmd_dec(cmd,\n")
+            out.write("\t\t\t&g_arsdk_cmd_desc_%s_%s",
+                    _to_c_name(featureObj.name),
+                    msgName)
+            for argObj in msgObj.args:
+                out.write(",\n\t\t\t_%s" % argObj.name)
+            out.write(");\n")
+            out.write("}\n\n")
 
 #===============================================================================
 #===============================================================================
@@ -521,191 +425,6 @@ def gen_cmd_dec_c(ctx, out):
     for featureId in sorted(ctx.featuresById.keys()):
         featureObj = ctx.featuresById[featureId]
 
-        for msgObj in _get_msgs_with_multiset(featureObj.getMsgs()):
-            msgName = _to_c_name(msgObj.name) if msgObj.cls == None else \
-                    _to_c_name(msgObj.cls.name)+'_'+_to_c_name(msgObj.name)
-
-            out.write("int arsdk_cmd_dec_%s_%s(\n",
-                    _to_c_name(featureObj.name),
-                    msgName)
-            out.write("\t\tconst struct arsdk_cmd *cmd")
-            for argObj in msgObj.args:
-
-                if isinstance(argObj.argType, arsdkparser.ArEnum):
-                    # FIXME: use a real enum type
-                    out.write(",\n\t\tint32_t")
-                elif isinstance(argObj.argType, arsdkparser.ArBitfield):
-                    out.write(",\n\t\t%s",
-                            _get_arg_type_c_name(argObj.argType.btfType))
-                elif isinstance(argObj.argType, arsdkparser.ArMultiSetting):
-                    out.write(",\n\t\t%s",
-                            _get_multiset_c_name(featureObj, argObj.argType))
-                else:
-                    out.write(",\n\t\t%s", _get_arg_type_c_name(argObj.argType))
-                if argObj.argType != arsdkparser.ArArgType.STRING:
-                    out.write(" ")
-                out.write("*_%s" % argObj.name)
-            out.write(") {\n")
-
-            arg = list(_get_args_multiset(msgObj.args))[0]
-            multiset = arg.argType
-            out.write("\tint res = 0;\n")
-            out.write("\tsize_t cmd_i = 0;\n")
-            out.write("\tstruct arsdk_cmd cmds[%d];\n", len(multiset.msgs))
-            out.write("\tstruct arsdk_cmd *single_cmd = NULL;\n")
-            out.write("\tstruct arsdk_multiset multi = {\n")
-            out.write("\t\t.descs = g_arsdk_cmd_desc_multiset_%s_table,\n",
-                _to_c_name(argObj.argType.name))
-            out.write("\t\t.n_descs = %d,\n", len(multiset.msgs))
-            out.write("\t\t.cmds = cmds,\n")
-            out.write("\t\t.n_cmds = 0,\n")
-            out.write("\t};\n")
-            out.write("\n")
-
-            out.write("\tres = arsdk_cmd_dec(cmd,\n")
-            out.write("\t\t\t&g_arsdk_cmd_desc_%s_%s,\n",
-                    _to_c_name(featureObj.name),
-                    msgName)
-            out.write("\t\t\t&multi);\n")
-            out.write("\tif (res < 0)\n")
-            out.write("\t\treturn res;\n")
-            out.write("\n")
-
-            out.write("\t/* reset multiset */\n")
-            out.write("\tmemset(_settings, 0, sizeof(*_settings));\n")
-            out.write("\n")
-
-            out.write("\tfor (cmd_i = 0; cmd_i < multi.n_cmds; cmd_i++) {\n")
-            out.write("\t\tsingle_cmd = &multi.cmds[cmd_i];\n")
-            out.write("\n")
-
-            out.write("\t\tswitch (single_cmd->id) {\n")
-            for mset_msg in multiset.msgs:
-                if mset_msg.cls:
-                    mset_msg_name = "%s_%s" % \
-                            (_to_c_name(mset_msg.cls.name),
-                            _to_c_name(mset_msg.name))
-                    mset_msg_id = "ARSDK_ID_%s_%s_%s" % \
-                             (_to_c_enum(mset_msg.ftr.name),
-                             _to_c_enum(mset_msg.cls.name),
-                             _to_c_enum(mset_msg.name))
-                else:
-                    mset_msg_name = _to_c_name(mset_msg.name)
-                    mset_msg_id = "ARSDK_ID_%s_%s" % \
-                             (_to_c_enum(mset_msg.ftr.name),
-                             _to_c_enum(mset_msg.name))
-
-                out.write("\t\tcase %s:\n", mset_msg_id)
-                out.write("\t\t\tres = arsdk_cmd_dec_%s_%s(single_cmd,\n",
-                        _to_c_name(mset_msg.ftr.name),
-                        mset_msg_name)
-                for mset_msg_arg in mset_msg.args:
-                    out.write("\t\t\t\t\t&_%s->%s.%s",
-                            arg.name,
-                            _get_multiset_msg_c_name(mset_msg),
-                            mset_msg_arg.name)
-                    if mset_msg_arg == mset_msg.args[-1]:
-                        out.write(");\n")
-                    else:
-                        out.write(",\n")
-                out.write("\t\t\tif (res < 0)\n")
-                out.write('\t\t\t\tARSDK_LOGE("arsdk_cmd_dec_%s_%s failed :'
-                        ' err=%%d(%%s)", -res, strerror(-res));\n',
-                        _to_c_name(mset_msg.ftr.name),
-                        mset_msg_name)
-                out.write("\t\t\t_%s->%s.is_set = 1;\n",
-                        arg.name,
-                        _get_multiset_msg_c_name(mset_msg))
-
-                out.write("\t\t\tbreak;\n")
-                out.write("\n")
-            out.write("\t\tdefault:\n")
-            out.write("\t\t\t/* Message not expected */\n")
-            out.write("\t\t\tbreak;\n")
-            out.write("\t\t}\n")
-            out.write("\n")
-
-
-            out.write("\t\t/* Cleanup command */\n")
-            out.write("\t\tarsdk_cmd_clear(single_cmd);\n")
-            out.write("\t}\n")
-            out.write("\n")
-
-            out.write("\treturn res;\n")
-            out.write("}\n\n")
-
-        for msgObj in _get_msgs_with_multiset(featureObj.getMsgs()):
-            msgName = _to_c_name(msgObj.name) if msgObj.cls == None else \
-                    _to_c_name(msgObj.cls.name)+'_'+_to_c_name(msgObj.name)
-
-            out.write("int arsdk_cmd_dec_%s_%s_in_cmds(\n",
-                    _to_c_name(featureObj.name), msgName)
-            out.write("\t\tconst struct arsdk_cmd *cmd,\n")
-            out.write("\t\tvoid (*cb)(const struct arsdk_cmd *cmd, "
-                      "void *userdata),\n")
-            out.write("\t\tvoid *userdata) {\n")
-
-            arg = list(_get_args_multiset(msgObj.args))[0]
-            multiset = arg.argType
-            out.write("\tint res = 0;\n")
-            out.write("\tsize_t cmd_i = 0;\n")
-            out.write("\tstruct arsdk_cmd cmds[%d];\n", len(multiset.msgs))
-            out.write("\tstruct arsdk_cmd *single_cmd = NULL;\n")
-            out.write("\tstruct arsdk_multiset multi = {\n")
-            out.write("\t\t.descs = g_arsdk_cmd_desc_multiset_%s_table,\n",
-                _to_c_name(argObj.argType.name))
-            out.write("\t\t.n_descs = %d,\n", len(multiset.msgs))
-            out.write("\t\t.cmds = cmds,\n")
-            out.write("\t\t.n_cmds = 0,\n")
-            out.write("\t};\n")
-            out.write("\n")
-
-            out.write("\tARSDK_RETURN_ERR_IF_FAILED(cmd != NULL, -EINVAL);\n")
-            out.write("\tARSDK_RETURN_ERR_IF_FAILED(cb != NULL, -EINVAL);\n")
-
-            out.write("\tres = arsdk_cmd_dec(cmd,\n")
-            out.write("\t\t\t&g_arsdk_cmd_desc_%s_%s,\n",
-                    _to_c_name(featureObj.name), msgName)
-            out.write("\t\t\t&multi);\n")
-            out.write("\tif (res < 0)\n")
-            out.write("\t\treturn res;\n")
-            out.write("\n")
-
-            out.write("\tfor (cmd_i = 0; cmd_i < multi.n_cmds; cmd_i++) {\n")
-            out.write("\t\tsingle_cmd = &multi.cmds[cmd_i];\n")
-            out.write("\n")
-
-            out.write("\t\tif (")
-
-            for mset_msg in multiset.msgs:
-                if mset_msg.cls:
-                    mset_msg_name = "%s_%s" % \
-                            (_to_c_name(mset_msg.cls.name),
-                            _to_c_name(mset_msg.name))
-                    mset_msg_id = "ARSDK_ID_%s_%s_%s" % \
-                             (_to_c_enum(mset_msg.ftr.name),
-                             _to_c_enum(mset_msg.cls.name),
-                             _to_c_enum(mset_msg.name))
-                else:
-                    mset_msg_name = _to_c_name(mset_msg.name)
-                    mset_msg_id = "ARSDK_ID_%s_%s" % \
-                             (_to_c_enum(mset_msg.ftr.name),
-                             _to_c_enum(mset_msg.name))
-                if mset_msg is not multiset.msgs[0]:
-                    out.write(" ||\n\t\t    ")
-                out.write("(single_cmd->id == %s)", mset_msg_id)
-            out.write(") {\n")
-            out.write("\t\t\t(*cb)(single_cmd, userdata);\n")
-            out.write("\t\t}\n")
-            out.write("\n")
-            out.write("\t\t/* Cleanup command */\n")
-            out.write("\t\tarsdk_cmd_clear(single_cmd);\n")
-            out.write("\t}\n")
-            out.write("\n")
-
-            out.write("\treturn res;\n")
-            out.write("}\n\n")
-
 #===============================================================================
 #===============================================================================
 def gen_cmd_enc_h(ctx, out):
@@ -715,10 +434,7 @@ def gen_cmd_enc_h(ctx, out):
             msgName = _to_c_name(msgObj.name) if msgObj.cls == None else \
                     _to_c_name(msgObj.cls.name)+'_'+_to_c_name(msgObj.name)
 
-            if list(_get_args_multiset(msgObj.args)):
-                out.write("ARSDK_API int\n")
-            else:
-                out.write("static inline int\n")
+            out.write("static inline int\n")
             out.write("arsdk_cmd_enc_%s_%s(\n",
                     _to_c_name(featureObj.name),
                     msgName)
@@ -730,18 +446,12 @@ def gen_cmd_enc_h(ctx, out):
                 elif isinstance(argObj.argType, arsdkparser.ArBitfield):
                     out.write(",\n\t\t%s",
                             _get_arg_type_c_name(argObj.argType.btfType))
-                elif isinstance(argObj.argType, arsdkparser.ArMultiSetting):
-                    out.write(",\n\t\t%s *",
-                            _get_multiset_c_name(featureObj, argObj.argType))
                 else:
                     out.write(",\n\t\t%s", _get_arg_type_c_name(argObj.argType))
 
-                if argObj.argType != arsdkparser.ArArgType.STRING or \
-                   isinstance(argObj.argType, arsdkparser.ArMultiSetting):
+                if argObj.argType != arsdkparser.ArArgType.STRING:
                     out.write(" ")
                 out.write("_%s" % argObj.name)
-            if list(_get_args_multiset(msgObj.args)):
-                out.write(");\n\n")
             else:
                 out.write(") {\n")
                 out.write("\treturn arsdk_cmd_enc(cmd,\n")
@@ -760,84 +470,6 @@ def gen_cmd_enc_c(ctx, out):
     out.write("\n")
     for featureId in sorted(ctx.featuresById.keys()):
         featureObj = ctx.featuresById[featureId]
-        for msgObj in _get_msgs_with_multiset(featureObj.getMsgs()):
-            msgName = _to_c_name(msgObj.name) if msgObj.cls == None else \
-                    _to_c_name(msgObj.cls.name)+'_'+_to_c_name(msgObj.name)
-
-            out.write("int\narsdk_cmd_enc_%s_%s(\n",
-                    _to_c_name(featureObj.name),
-                    msgName)
-            out.write("\t\tstruct arsdk_cmd *cmd")
-            for argObj in msgObj.args:
-                if isinstance(argObj.argType, arsdkparser.ArEnum):
-                    # FIXME: use a real enum type
-                    out.write(",\n\t\tint32_t")
-                elif isinstance(argObj.argType, arsdkparser.ArBitfield):
-                    out.write(",\n\t\t%s",
-                            _get_arg_type_c_name(argObj.argType.btfType))
-                elif isinstance(argObj.argType, arsdkparser.ArMultiSetting):
-                    out.write(",\n\t\t%s *",
-                            _get_multiset_c_name(featureObj, argObj.argType))
-                else:
-                    out.write(",\n\t\t%s", _get_arg_type_c_name(argObj.argType))
-
-                if argObj.argType != arsdkparser.ArArgType.STRING or \
-                   isinstance(argObj.argType, arsdkparser.ArMultiSetting):
-                    out.write(" ")
-                out.write("_%s" % argObj.name)
-            out.write(") {\n")
-            arg = list(_get_args_multiset(msgObj.args))[0]
-            multiset = arg.argType
-            out.write("\tstruct arsdk_cmd cmds[%d];\n", len(multiset.msgs))
-            out.write("\tint res = 0;\n")
-            out.write("\tsize_t cmd_i = 0;\n")
-            out.write("\tstruct arsdk_multiset multi = {\n")
-            out.write("\t\t.descs = g_arsdk_cmd_desc_multiset_%s_table,\n",
-                    _to_c_name(argObj.argType.name))
-            out.write("\t\t.n_descs = %d,\n", len(multiset.msgs))
-            out.write("\t\t.cmds = cmds,\n")
-            out.write("\t\t.n_cmds = 0,\n")
-            out.write("\t};\n")
-            out.write("\n")
-
-            for mset_msg in multiset.msgs:
-                out.write("\tif (_%s->%s.is_set) {\n",
-                        arg.name,
-                        _get_multiset_msg_c_name(mset_msg))
-                out.write("\t\tres = arsdk_cmd_enc_%s_%s(\n",
-                        _to_c_name(mset_msg.ftr.name),
-                        _get_msg_name(mset_msg))
-                out.write("\t\t\t\t&multi.cmds[multi.n_cmds],\n")
-                for mset_msg_arg in mset_msg.args:
-                    out.write("\t\t\t\t_%s->%s.%s", arg.name,
-                            _get_multiset_msg_c_name(mset_msg),
-                           mset_msg_arg.name)
-                    if mset_msg_arg == mset_msg.args[-1]:
-                        out.write(");\n")
-                    else:
-                        out.write(",\n")
-                out.write("\t\tif (res < 0)\n")
-                out.write("\t\t\tgoto error;\n")
-                out.write("\n")
-                out.write("\t\tmulti.n_cmds++;\n")
-                out.write("\t}\n")
-                out.write("\n")
-
-            out.write("\tres = arsdk_cmd_enc(cmd,\n")
-            out.write("\t\t\t&g_arsdk_cmd_desc_%s_%s,\n",
-                    _to_c_name(featureObj.name),
-                    msgName)
-            out.write("\t\t\t&multi);\n")
-            out.write("\tif (res < 0)\n")
-            out.write("\t\tgoto error;\n")
-            out.write("\n")
-            out.write("error:\n")
-            out.write("\tfor (cmd_i = 0; cmd_i < multi.n_cmds; cmd_i++) {\n")
-            out.write("\t\tarsdk_cmd_clear(&multi.cmds[cmd_i]);\n")
-            out.write("\t}\n")
-            out.write("\n")
-            out.write("\treturn res;\n")
-            out.write("}\n\n")
 
 #===============================================================================
 #===============================================================================
@@ -860,13 +492,9 @@ def gen_cmd_send_h(ctx, out):
                 elif isinstance(argObj.argType, arsdkparser.ArBitfield):
                     out.write(",\n\t\t%s",
                         _get_arg_type_c_name(argObj.argType.btfType))
-                elif isinstance(argObj.argType, arsdkparser.ArMultiSetting):
-                    out.write(",\n\t\t%s *",
-                        _get_multiset_c_name(featureObj, argObj.argType))
                 else:
                     out.write(",\n\t\t%s", _get_arg_type_c_name(argObj.argType))
-                if argObj.argType != arsdkparser.ArArgType.STRING and \
-                   not isinstance(argObj.argType, arsdkparser.ArMultiSetting):
+                if argObj.argType != arsdkparser.ArArgType.STRING :
                     out.write(" ")
                 out.write("_%s" % argObj.name)
             out.write(") {\n")
@@ -892,7 +520,6 @@ def gen_cmd_send_h(ctx, out):
 entries = [
     {"name": "arsdk_ids.h", "func": gen_ids_h},
     {"name": "arsdk_enums.h", "func": gen_enums_h},
-    {"name": "arsdk_multisettings.h", "func": gen_multisets_h},
     {"name": "arsdk_cmd_desc.h", "func": gen_cmd_desc_h},
     {"name": "arsdk_cmd_desc.c", "func": gen_cmd_desc_c},
     {"name": "arsdk_cmd_dec.h", "func": gen_cmd_dec_h},

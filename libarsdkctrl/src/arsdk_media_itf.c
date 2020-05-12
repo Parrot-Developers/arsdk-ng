@@ -688,7 +688,7 @@ static int req_new(struct arsdk_media_itf *itf,
 	req->dev_type = dev_type;
 	req->dev_fld = arsdk_device_type_to_fld(dev_type);
 	if (req->dev_fld == NULL) {
-		res = -EINVAL;
+		res = -ENOENT;
 		goto error;
 	}
 

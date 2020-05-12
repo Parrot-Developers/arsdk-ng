@@ -32,7 +32,6 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <ftw.h>
-#include <fnmatch.h>
 
 #include "arsdk_flight_log_itf_priv.h"
 
@@ -552,13 +551,24 @@ static int clean_local_dir(struct arsdk_flight_log_req *req)
 
 static int is_flight_log(const char *name)
 {
-	int res = 0;
+	size_t len = 0;
 
 	if (name == NULL)
 		return 0;
+	len = strlen(name);
 
-	res = fnmatch("log-*.bin", name, FNM_PATHNAME);
-	return (res == 0);
+	if (len < 8)
+		return 0;
+
+	/* Start with "log-" ? */
+	if (strncmp(name, "log-", 4) != 0)
+		return 0;
+
+	/* End with ".bin" ? */
+	if (strncmp(name + len - 4, ".bin", 4) != 0)
+		return 0;
+
+	return 1;
 }
 
 static int req_start_next(struct arsdk_flight_log_req *req)

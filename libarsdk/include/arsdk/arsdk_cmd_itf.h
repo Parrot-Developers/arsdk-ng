@@ -27,21 +27,23 @@
 #ifndef _ARSDK_CMD_ITF_H_
 #define _ARSDK_CMD_ITF_H_
 
+/**
+ * Formats the full command identifier.
+ *
+ * @param prj_id : project identifier.
+ * @param cls_id : class identifier.
+ * @param cmd_id : command identifier.
+ *
+ * @return The full command identifier.
+ */
 #define ARSDK_CMD_FULL_ID(prj_id, cls_id, cmd_id) \
 	((uint32_t)(prj_id) << 24 | \
 	(uint32_t)(cls_id) << 16 | \
 	(uint32_t)(cmd_id))
 
-struct arsdk_multiset {
-	const struct arsdk_cmd_desc * const *descs;
-	size_t n_descs;
-	struct arsdk_cmd *cmds;
-	size_t n_cmds;
-};
-
 /** Value structure */
 struct arsdk_value {
-	enum arsdk_arg_type type;
+	enum arsdk_arg_type type;   /**< value type */
 
 	union {
 		int8_t      i8;     /**< i8 value */
@@ -56,11 +58,10 @@ struct arsdk_value {
 		double      f64;    /**< f64 value */
 		char        *str;   /**< str value */
 		const char  *cstr;  /**< cstr value */
-		struct arsdk_multiset *multi; /**< multi value */
-	} data;
+	} data; /**< value data */
 };
 
-/** */
+/** Command structure */
 struct arsdk_cmd {
 	uint8_t             prj_id;     /**< Project Id */
 	uint8_t             cls_id;     /**< Class Id */

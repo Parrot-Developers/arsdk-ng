@@ -686,6 +686,10 @@ int arsdk_pud_itf_create_req(struct arsdk_pud_itf *itf,
 	}
 
 	fld_name = arsdk_device_type_to_fld(dev_type);
+	if (fld_name == NULL) {
+		res = -ENOENT;
+		goto error;
+	}
 	res = asprintf(&req->remote_path, ARSDK_PUD_DIR_FORMAT, fld_name);
 	if (res < 0) {
 		res = -ENOMEM;

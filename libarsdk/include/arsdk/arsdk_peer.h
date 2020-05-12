@@ -32,6 +32,7 @@
  */
 struct arsdk_peer_info {
 	enum arsdk_backend_type  backend_type;  /**< Underlying backend type */
+	uint32_t                 proto_v;       /**< Protocol version */
 	const char               *ctrl_name;    /**< Controller name */
 	const char               *ctrl_type;    /**< Controller type */
 	const char               *ctrl_addr;    /**< Controller address */

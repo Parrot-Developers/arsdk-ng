@@ -32,13 +32,15 @@ struct arsdk_transport_net;
 
 /** */
 struct arsdk_transport_net_cfg {
+	/** protocol version to used */
+	uint32_t   proto_v;
 	in_addr_t  tx_addr;
 	int        qos_mode;
 	int        stream_supported;
 
 	struct {
-		uint16_t	rx_port;
-		uint16_t	tx_port;
+		uint16_t rx_port;
+		uint16_t tx_port;
 	} data;
 };
 

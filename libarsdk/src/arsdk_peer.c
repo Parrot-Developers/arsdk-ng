@@ -25,7 +25,7 @@
  */
 
 #include "arsdk_priv.h"
-#include "arsdk_cmd_itf_priv.h"
+#include "cmd_itf/arsdk_cmd_itf_priv.h"
 #include "arsdk_default_log.h"
 
 /**
@@ -447,11 +447,8 @@ int arsdk_peer_create_cmd_itf(struct arsdk_peer *self,
 	memset(&internal_cbs, 0, sizeof(internal_cbs));
 	internal_cbs.userdata = self;
 	internal_cbs.dispose = &cmd_itf_dispose;
-	res = arsdk_cmd_itf_new(
-			self->transport,
-			cbs, &internal_cbs,
-			tx_info_table, tx_count, ackoff,
-			ret_itf);
+	res = arsdk_cmd_itf_new(self->transport, cbs, &internal_cbs,
+			tx_info_table, tx_count, ackoff, ret_itf);
 	if (res == 0) {
 		/* Keep it */
 		self->cmd_itf = *ret_itf;

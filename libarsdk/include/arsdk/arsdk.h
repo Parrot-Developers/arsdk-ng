@@ -58,6 +58,61 @@ struct arsdk_cmd_itf;
 struct arsdk_peer;
 struct arsdk_peer_info;
 
+/**
+ * Original version.
+ * Supported by default if the protocol version is not informed.
+ *
+ * Transport Frame:
+ *     [ 1    ][ 1  ][ 1   ][ 4     ][ f_len - 7 ]
+ *     [ type ][ id ][ seq ][ f_len ][ payload   ]
+ *
+ *     type: Data type value in range [0;10[.
+ *           Unsigned integer encoded on 1 byte.
+ *     id : Buffer identifier.
+ *          Unsigned integer encoded on 1 byte.
+ *     seq : Packet sequence number.
+ *           Unsigned integer encoded on 1 byte.
+ *     f_len : Frame length.
+ *             Unsigned integer encoded on 4 byte.
+ *     payload: Payload data of length of 'f_len' minus header size (7 bytes).
+ *
+ * Command Interface:
+ *     Uses cmd_itf1.
+ */
+#define ARSDK_PROTOCOL_VERSION_1 1
+
+/**
+ * Packing version.
+ *
+ * Transport Frame:
+ *     [ varuint ][ 1    ][ 1  ][ 2   ][ varuint ][ p_len   ]
+ *     [ version ][ type ][ id ][ seq ][ p_len   ][ payload ]
+ *
+ *     varuint: Unsigned 32 bits integer encoded with variable length.
+ *              For each byte, the most significant bit is a flag set
+ *              to indicate that an other byte follows and the 7 others bits
+ *              are value data.
+ *              Length in range [1;5] bytes.
+ *
+ *     version: Protocol version offested of 'type' maximum value (10) to
+ *              differentiate from protocol v1.
+ *              Encoded as 'varuint'.
+ *              Is always equal to '12' on 1 byte for this version.
+ *     type: Data type value in range [0;10[.
+ *           Unsigned integer encoded on 1 byte.
+ *     id : Buffer identifier.
+ *          Unsigned integer encoded on 1 byte.
+ *     seq : Packet sequence number.
+ *           Unsigned integer encoded on 2 bytes.
+ *     p_len : Payload length
+ *             Encoded as 'varuint'.
+ *     payload: Payload data of length of 'p_len'.
+ *
+ * Command Interface:
+ *     Uses cmd_itf2.
+ */
+#define ARSDK_PROTOCOL_VERSION_2 2
+
 #include "arsdk_desc.h"
 #include "arsdk_cmd_itf.h"
 
@@ -74,7 +129,6 @@ struct arsdk_peer_info;
 /* Generated files */
 #include "arsdk_ids.h"
 #include "arsdk_enums.h"
-#include "arsdk_multisettings.h"
 #include "arsdk_cmd_desc.h"
 #include "arsdk_cmd_dec.h"
 #include "arsdk_cmd_enc.h"

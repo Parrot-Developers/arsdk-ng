@@ -69,6 +69,18 @@
 #define ARSDK_CONN_JSON_KEY_C2D_USER_PORT          "c2d_user_port"
 #define ARSDK_CONN_JSON_KEY_SKYCONTROLLER_VERSION  "skycontroller_version"
 #define ARSDK_CONN_JSON_KEY_QOS_MODE               "qos_mode"
+/**
+ * json key used by the controller to indicate
+ * the minimum protocol version supported
+ */
+#define ARSDK_CONN_JSON_KEY_PROTO_V_MIN            "proto_v_min"
+/**
+ * json key used by the controller to indicate
+ * the maximum protocol version supported
+ */
+#define ARSDK_CONN_JSON_KEY_PROTO_V_MAX            "proto_v_max"
+/** json key used by the device to indicate the chosen protocol version. */
+#define ARSDK_CONN_JSON_KEY_PROTO_V                "proto_v"
 
 #ifdef _WIN32
 

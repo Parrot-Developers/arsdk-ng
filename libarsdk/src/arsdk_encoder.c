@@ -206,57 +206,6 @@ static int encoder_write_f64(struct encoder *enc, double v)
 
 /**
  */
-static int encoder_write_multiset(struct encoder *enc,
-		struct arsdk_multiset *multi)
-{
-	int res = 0;
-	struct arsdk_cmd cmd;
-	uint32_t cmd_i = 0;
-	void *data;
-	size_t len;
-	size_t capacity;
-	size_t multiset_size = 0;
-
-	ARSDK_RETURN_ERR_IF_FAILED(enc != NULL, -EINVAL);
-	ARSDK_RETURN_ERR_IF_FAILED(multi != NULL, -EINVAL);
-	ARSDK_RETURN_ERR_IF_FAILED(multi->cmds != NULL, -EINVAL);
-
-	/* Calculate multi setting size */
-	for (cmd_i = 0; cmd_i < multi->n_cmds; cmd_i++) {
-		cmd = multi->cmds[cmd_i];
-		res = pomp_buffer_get_data(cmd.buf, &data, &len, &capacity);
-		if (res < 0)
-			return res;
-
-		multiset_size += (sizeof(uint16_t) + len);
-	}
-
-	/* Write multi setting size */
-	res = encoder_write_u16(enc, multiset_size);
-	if (res < 0)
-		return res;
-
-	for (cmd_i = 0; cmd_i < multi->n_cmds; cmd_i++) {
-		cmd = multi->cmds[cmd_i];
-
-		res = pomp_buffer_get_data(cmd.buf, &data, &len, &capacity);
-		if (res < 0)
-			return res;
-
-		res = encoder_write_u16(enc, len);
-		if (res < 0)
-			return res;
-
-		res = encoder_write(enc, data, len);
-		if (res < 0)
-			return res;
-	}
-
-	return res;
-}
-
-/**
- */
 static int cmd_encv_internal(struct arsdk_cmd *cmd,
 			     const struct arsdk_cmd_desc *desc, size_t argc,
 			     const struct arsdk_value *argv, va_list args)
@@ -434,18 +383,6 @@ static int cmd_encv_internal(struct arsdk_cmd *cmd,
 				val.data.i32 = va_arg(args, int);
 			}
 			res = encoder_write_i32(&enc, val.data.i32);
-			if (res < 0)
-				goto out;
-			break;
-
-		case ARSDK_ARG_TYPE_MULTISET:
-			if (argv == NULL) {
-				val.type = ARSDK_ARG_TYPE_MULTISET;
-				val.data.multi = va_arg(args,
-						struct arsdk_multiset *);
-			}
-
-			res = encoder_write_multiset(&enc, val.data.multi);
 			if (res < 0)
 				goto out;
 			break;

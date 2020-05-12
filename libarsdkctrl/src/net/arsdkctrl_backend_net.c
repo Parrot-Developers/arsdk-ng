@@ -44,7 +44,7 @@ enum device_conn_state {
 
 /** */
 struct arsdk_device_conn {
-	struct arsdk_device                   *device;
+	struct arsdk_device                    *device;
 	struct arsdk_device_conn_internal_cbs  cbs;
 	enum device_conn_state                 state;
 	struct pomp_loop                       *loop;
@@ -62,6 +62,12 @@ struct arsdk_device_conn {
 	int                                    qos_mode_supported;
 	int                                    qos_mode;
 	int                                    stream_supported;
+	/** minimum protocol version supported */
+	uint32_t                               proto_v_min;
+	/** maximum protocol version supported */
+	uint32_t                               proto_v_max;
+	/** protocol version used */
+	uint32_t                               proto_v;
 };
 
 /** */
@@ -76,18 +82,10 @@ struct arsdkctrl_backend_net {
 
 	int                                    qos_mode_supported;
 	int                                    stream_supported;
-};
-
-/** */
-struct arsdk_req {
-	char      *ctrl_name;
-	char      *ctrl_type;
-	uint16_t  d2c_data_port;
-	uint16_t  d2c_rtp_port;
-	uint16_t  d2c_rtcp_port;
-	char      *device_id;
-	char      *json;
-	int       qos_mode;
+	/** minimum protocol version supported */
+	uint32_t                               proto_v_min;
+	/** maximum protocol version supported */
+	uint32_t                               proto_v_max;
 };
 
 static void arsdkctrl_backend_net_socket_cb(struct arsdkctrl_backend *base,
@@ -150,6 +148,7 @@ static int device_conn_setup_transport(struct arsdk_device_conn *self,
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.data.rx_port = ARSDK_NET_DEFAULT_D2C_DATA_PORT;
 	cfg.stream_supported = backend_net->stream_supported;
+	cfg.proto_v = self->proto_v;
 
 	/* Create transport */
 	memset(&transport_net_cbs, 0, sizeof(transport_net_cbs));
@@ -228,6 +227,12 @@ static int device_conn_send_json(struct arsdk_device_conn *self,
 	json_object_object_add(jroot, ARSDK_CONN_JSON_KEY_QOS_MODE,
 			json_object_new_int(self->qos_mode_supported));
 
+	/* Add supported protocol versions */
+	json_object_object_add(jroot, ARSDK_CONN_JSON_KEY_PROTO_V_MIN,
+			json_object_new_int(self->proto_v_min));
+	json_object_object_add(jroot, ARSDK_CONN_JSON_KEY_PROTO_V_MAX,
+			json_object_new_int(self->proto_v_max));
+
 	/* Get updated json */
 	newjson = json_object_to_json_string(jroot);
 	if (newjson == NULL) {
@@ -279,6 +284,24 @@ static int parse_qos_mode(json_object *object)
 
 /**
  */
+static uint32_t parse_proto_version(json_object *object)
+{
+	/* by default only the protocol version 1 is considered as supported */
+	uint32_t proto_v = ARSDK_PROTOCOL_VERSION_1;
+	json_object *jproto_v = NULL;
+
+	if (!object)
+		return 1;
+
+	jproto_v = get_json_object(object, ARSDK_CONN_JSON_KEY_PROTO_V);
+	if (jproto_v != NULL)
+		proto_v = json_object_get_int(jproto_v);
+
+	return proto_v;
+}
+
+/**
+ */
 static int device_conn_recv_json(struct arsdk_device_conn *self,
 		struct pomp_buffer *buf)
 {
@@ -325,6 +348,8 @@ static int device_conn_recv_json(struct arsdk_device_conn *self,
 	/* Parse the chosen QOS mode:
 	 * if not present QOS is unsupported by the device */
 	self->qos_mode = parse_qos_mode(jroot);
+
+	self->proto_v = parse_proto_version(jroot);
 
 end:
 	/* Success */
@@ -451,6 +476,14 @@ static void device_conn_raw_cb(
 		goto rejected;
 	}
 
+	/* Check the protocol version */
+	if (self->proto_v < self->proto_v_min &&
+	    self->proto_v > self->proto_v_max) {
+		ARSDK_LOGI("Bad protocol version (%d) not supported",
+				self->proto_v);
+		goto rejected;
+	}
+
 	/* Setup tx address and ports for transport layer */
 	memset(&cfg, 0, sizeof(cfg));
 	res = arsdk_transport_net_get_cfg(self->transport, &cfg);
@@ -459,6 +492,7 @@ static void device_conn_raw_cb(
 	cfg.tx_addr = self->in_addr;
 	cfg.qos_mode = self->qos_mode;
 	cfg.data.tx_port = self->c2d_data_port;
+	cfg.proto_v = self->proto_v;
 	res = arsdk_transport_net_update_cfg(self->transport, &cfg);
 	if (res < 0)
 		goto error;
@@ -469,6 +503,7 @@ static void device_conn_raw_cb(
 		goto error;
 
 	newinfo = *info;
+	newinfo.proto_v = self->proto_v;
 	newinfo.json = self->rxjson;
 
 	/* Notify connection */
@@ -520,6 +555,7 @@ static int device_conn_new(
 		const struct arsdk_device_conn_cfg *cfg,
 		const struct arsdk_device_conn_internal_cbs *cbs,
 		struct pomp_loop *loop,
+		uint32_t proto_v_max, uint32_t proto_v_min,
 		int qos_mode_supported,
 		int stream_supported,
 		struct arsdk_device_conn **ret_conn)
@@ -545,6 +581,8 @@ static int device_conn_new(
 	self->qos_mode_supported = qos_mode_supported;
 	self->stream_supported = stream_supported;
 	self->state = DEVICE_CONN_STATE_IDLE;
+	self->proto_v_min = proto_v_min;
+	self->proto_v_max = proto_v_max;
 
 	/* Create pomp context, make it raw */
 	self->ctx = pomp_ctx_new_with_loop(&device_conn_event_cb, self, loop);
@@ -609,6 +647,7 @@ static int arsdkctrl_backend_net_start_device_conn(
 
 	/* Create device connection context */
 	res = device_conn_new(device, cfg, cbs, loop,
+			self->proto_v_max, self->proto_v_min,
 			self->qos_mode_supported,
 			self->stream_supported,
 			&conn);
@@ -696,6 +735,16 @@ int arsdkctrl_backend_net_new(struct arsdk_ctrl *ctrl,
 	ARSDK_RETURN_ERR_IF_FAILED(ret_obj != NULL, -EINVAL);
 	*ret_obj = NULL;
 	ARSDK_RETURN_ERR_IF_FAILED(cfg != NULL, -EINVAL);
+#if ARSDKCTRL_BACKEND_NET_PROTO_MIN > 1
+	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_min == 0 ||
+			cfg->proto_v_min >= ARSDKCTRL_BACKEND_NET_PROTO_MIN,
+			-EINVAL);
+#endif
+	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_max == 0 ||
+			cfg->proto_v_max <= ARSDKCTRL_BACKEND_NET_PROTO_MAX,
+			-EINVAL);
+	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_min <= cfg->proto_v_max,
+			-EINVAL);
 
 	/* Allocate structure */
 	self = calloc(1, sizeof(*self));
@@ -713,6 +762,11 @@ int arsdkctrl_backend_net_new(struct arsdk_ctrl *ctrl,
 	self->iface = xstrdup(cfg->iface);
 	self->qos_mode_supported = cfg->qos_mode_supported;
 	self->stream_supported = cfg->stream_supported;
+	/* by default all protocol versions implemented are supported */
+	self->proto_v_min = cfg->proto_v_min != 0 ? cfg->proto_v_min :
+			ARSDKCTRL_BACKEND_NET_PROTO_MIN;
+	self->proto_v_max = cfg->proto_v_max != 0 ? cfg->proto_v_max :
+			ARSDKCTRL_BACKEND_NET_PROTO_MAX;
 
 	/* Success */
 	*ret_obj = self;

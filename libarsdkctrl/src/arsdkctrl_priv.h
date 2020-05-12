@@ -27,6 +27,11 @@
 #ifndef _ARSDKCTRL_PRIV_H_
 #define _ARSDKCTRL_PRIV_H_
 
+/* For gmtime_r access */
+#ifdef __MINGW32__
+#  define _POSIX_C_SOURCE 2
+#endif
+
 #ifndef _GNU_SOURCE
 #  define _GNU_SOURCE
 #endif /* !_GNU_SOURCE */
@@ -43,7 +48,7 @@
 /* Private headers */
 #include "arsdk_list.h"
 #include "arsdk_transport_ids.h"
-#include "arsdk_cmd_itf_priv.h"
+#include "cmd_itf/arsdk_cmd_itf_priv.h"
 #include "arsdk_md5_priv.h"
 #include "arsdk_device_priv.h"
 
@@ -67,6 +72,10 @@ struct arsdk_device {
 	struct arsdk_device_conn_cbs  cbs;
 	struct arsdk_transport        *transport;
 	struct arsdk_cmd_itf          *cmd_itf;
+	union {
+		struct arsdk_cmd_itf1   *v1;
+		struct arsdk_cmd_itf2   *v2;
+	} cmd_itf_child;
 	struct arsdk_ftp_itf          *ftp_itf;
 	struct arsdk_media_itf        *media_itf;
 	struct arsdk_updater_itf      *updater_itf;

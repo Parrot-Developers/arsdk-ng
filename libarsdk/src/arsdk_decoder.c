@@ -221,70 +221,6 @@ static int decoder_read_cstr(struct decoder *dec, const char **v)
 
 /**
  */
-static int decoder_read_multiset(struct decoder *dec,
-		struct arsdk_multiset *multi)
-{
-	int res = 0;
-	uint16_t multiset_size = 0;
-	size_t multiset_end = 0;
-	uint16_t single_cmd_size = 0;
-	struct pomp_buffer *buf = NULL;
-	struct arsdk_cmd *cmd = NULL;
-	const struct arsdk_cmd_desc *decs = NULL;
-	size_t desc_i = 0;
-
-	ARSDK_RETURN_ERR_IF_FAILED(multi != NULL, -EINVAL);
-	ARSDK_RETURN_ERR_IF_FAILED(multi->cmds != NULL, -EINVAL);
-
-	res = decoder_read_u16(dec, &multiset_size);
-	if (res < 0)
-		return res;
-
-	multiset_end = dec->off + multiset_size;
-	if (dec->len < multiset_end)
-		return -EINVAL;
-
-	while (dec->off < multiset_end) {
-		cmd = &multi->cmds[multi->n_cmds];
-
-		res = decoder_read_u16(dec, &single_cmd_size);
-		if (res < 0)
-			return res;
-
-		buf = pomp_buffer_new_with_data(
-				((const uint8_t *)dec->cdata + dec->off),
-				single_cmd_size);
-		if (buf == NULL)
-			return -ENOMEM;
-
-		arsdk_cmd_init_with_buf(cmd, buf);
-		pomp_buffer_unref(buf);
-
-		/* Try to decode header of command, Notify reception */
-		res = arsdk_cmd_dec_header(cmd);
-		if (res < 0) {
-			ARSDK_LOG_ERRNO("arsdk_cmd_dec_header", -res);
-		} else {
-			/* check multi setting and command matching */
-			for (desc_i = 0; desc_i < multi->n_descs; desc_i++) {
-				decs = multi->descs[desc_i];
-				if ((decs->prj_id == cmd->prj_id) &&
-				    (decs->cls_id == cmd->cls_id) &&
-				    (decs->cmd_id == cmd->cmd_id)) {
-					multi->n_cmds++;
-					break;
-				}
-			}
-		}
-
-		dec->off += single_cmd_size;
-	}
-
-	return res;
-}
-
-/**
- */
 #if defined(__GNUC__) && defined(__MINGW32__) && !defined(__clang__)
 __attribute__((__format__(__gnu_printf__, 4, 5)))
 #elif defined(__GNUC__)
@@ -495,13 +431,6 @@ int arsdk_cmd_dec(const struct arsdk_cmd *cmd,
 			*va_arg(args, int32_t *) = val.data.i32;
 			break;
 
-		case ARSDK_ARG_TYPE_MULTISET:
-			res = decoder_read_multiset(&dec,
-					va_arg(args, struct arsdk_multiset *));
-			if (res < 0)
-				goto out;
-			break;
-
 		default:
 			res = -EINVAL;
 			ARSDK_LOGW("decoder: unknown argument type %d",
@@ -685,12 +614,6 @@ int arsdk_cmd_get_values(const struct arsdk_cmd *cmd,
 			/* enum shall be extracted as i32 */
 			values[i].type = ARSDK_ARG_TYPE_ENUM;
 			res = decoder_read_i32(&dec, &values[i].data.i32);
-			break;
-
-		case ARSDK_ARG_TYPE_MULTISET:
-			values[i].type = ARSDK_ARG_TYPE_MULTISET;
-			res = decoder_read_multiset(&dec,
-					values[i].data.multi);
 			break;
 
 		default:

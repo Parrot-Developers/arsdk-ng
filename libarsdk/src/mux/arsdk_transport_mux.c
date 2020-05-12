@@ -289,8 +289,8 @@ int arsdk_transport_mux_new(
 		return -ENOMEM;
 
 	/* Setup base structure */
-	res = arsdk_transport_new(self, &s_arsdk_transport_mux_ops,
-			loop, ARSDK_TRANSPORT_PING_PERIOD, ARSDK_TRANSPORT_TAG,
+	res = arsdk_transport_new(self, &s_arsdk_transport_mux_ops, loop,
+			ARSDK_TRANSPORT_PING_PERIOD, ARSDK_TRANSPORT_TAG,
 			&self->parent);
 	if (res < 0)
 		goto error;

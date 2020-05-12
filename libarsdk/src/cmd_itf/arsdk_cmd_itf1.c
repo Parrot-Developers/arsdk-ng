@@ -25,7 +25,8 @@
  */
 
 #include "arsdk_priv.h"
-#include "arsdk_cmd_itf_priv.h"
+#include "cmd_itf/arsdk_cmd_itf_priv.h"
+#include "cmd_itf/arsdk_cmd_itf1.h"
 #include "arsdk_default_log.h"
 
 /** link quality analysis frequency */
@@ -55,16 +56,39 @@ struct queue {
 	uint8_t                      seq;
 };
 
+/** */
+struct arsdk_cmd_itf1 {
+	struct arsdk_cmd_itf1_cbs          cbs;
+	struct arsdk_cmd_itf_cbs           itf_cbs;
+	struct arsdk_cmd_itf               *itf;
+
+	struct arsdk_transport             *transport;
+	struct pomp_loop                   *loop;
+	struct pomp_timer                  *timer;
+	struct queue                       **tx_queues;
+	uint32_t                           tx_count;
+	uint8_t                            ackoff;
+	uint8_t                            next_ack_seq;
+	uint8_t                            recv_seq[UINT8_MAX+1];
+	struct {
+		struct pomp_timer          *timer;
+		uint32_t                   retry_count;
+		uint32_t                   ack_count;
+		uint32_t                   rx_miss_count;
+		uint32_t                   rx_useless_count;
+		uint32_t                   rx_useful_count;
+	} lnqlt;
+};
+
 /**
  */
-static void arsdk_cmd_itf_cmd_log(struct arsdk_cmd_itf *itf,
-		const struct arsdk_cmd *cmd,
-		enum arsdk_cmd_dir dir)
+static void cmd_log(struct arsdk_cmd_itf1 *self,
+		const struct arsdk_cmd *cmd, enum arsdk_cmd_dir dir)
 {
-	if (!itf->cbs.cmd_log)
+	if (!self->itf_cbs.cmd_log)
 		return;
 
-	(*itf->cbs.cmd_log)(itf, dir, cmd, itf->cbs.userdata);
+	(*self->itf_cbs.cmd_log)(self->itf, dir, cmd, self->itf_cbs.userdata);
 }
 
 /**
@@ -100,13 +124,12 @@ static void entry_clear(struct entry *entry)
 
 /**
  */
-static void entry_notify(struct entry *entry, struct arsdk_cmd_itf *itf,
+static void entry_notify(struct entry *entry, struct arsdk_cmd_itf1 *self,
 		enum arsdk_cmd_itf_send_status status, int done)
 {
 	/* Notify callback */
 	if (entry->send_status != NULL) {
-		(*entry->send_status)(itf, &entry->cmd,
-				status, done,
+		(*entry->send_status)(self->itf, &entry->cmd, status, done,
 				entry->userdata);
 	}
 }
@@ -136,7 +159,7 @@ static int queue_new(const struct arsdk_cmd_queue_info *info,
 
 /**
  */
-static void queue_stop(struct queue *queue, struct arsdk_cmd_itf *itf)
+static void queue_stop(struct queue *queue, struct arsdk_cmd_itf1 *self)
 {
 	uint32_t i = 0, pos = 0;
 	struct entry *entry = NULL;
@@ -145,7 +168,8 @@ static void queue_stop(struct queue *queue, struct arsdk_cmd_itf *itf)
 	pos = queue->head;
 	for (i = 0; i < queue->count; i++) {
 		entry = &queue->entries[pos];
-		entry_notify(entry, itf, ARSDK_CMD_ITF_SEND_STATUS_CANCELED, 1);
+		entry_notify(entry, self,
+				ARSDK_CMD_ITF_SEND_STATUS_CANCELED, 1);
 		entry_clear(entry);
 
 		/* Continue in circular buffer */
@@ -158,7 +182,7 @@ static void queue_stop(struct queue *queue, struct arsdk_cmd_itf *itf)
 
 /**
  */
-static int queue_destroy(struct queue *queue, struct arsdk_cmd_itf *itf)
+static int queue_destroy(struct queue *queue, struct arsdk_cmd_itf1 *self)
 {
 	if (queue->count != 0)
 		return -EBUSY;
@@ -170,7 +194,7 @@ static int queue_destroy(struct queue *queue, struct arsdk_cmd_itf *itf)
 /**
  */
 static int queue_replace(struct queue *queue,
-		struct arsdk_cmd_itf *itf,
+		struct arsdk_cmd_itf1 *itf,
 		const struct arsdk_cmd *cmd,
 		arsdk_cmd_itf_send_status_cb_t send_status,
 		void *userdata)
@@ -205,7 +229,7 @@ replace:
 /**
  */
 static int queue_add(struct queue *queue,
-		struct arsdk_cmd_itf *itf,
+		struct arsdk_cmd_itf1 *itf,
 		const struct arsdk_cmd *cmd,
 		arsdk_cmd_itf_send_status_cb_t send_status,
 		void *userdata)
@@ -281,7 +305,7 @@ static void queue_pop(struct queue *queue)
 
 /**
  */
-static struct queue *find_tx_queue(struct arsdk_cmd_itf *itf,
+static struct queue *find_tx_queue(struct arsdk_cmd_itf1 *self,
 		const struct arsdk_cmd *cmd)
 {
 	uint32_t i = 0;
@@ -305,8 +329,8 @@ static struct queue *find_tx_queue(struct arsdk_cmd_itf *itf,
 	}
 
 	/* Search suitable queue */
-	for (i = 0; i < itf->tx_count; i++) {
-		queue = itf->tx_queues[i];
+	for (i = 0; i < self->tx_count; i++) {
+		queue = self->tx_queues[i];
 		type = queue->info.type;
 		switch (buffer_type) {
 		case ARSDK_CMD_BUFFER_TYPE_NON_ACK:
@@ -339,7 +363,7 @@ static struct queue *find_tx_queue(struct arsdk_cmd_itf *itf,
 
 /**
  */
-static void check_tx_queue(struct arsdk_cmd_itf *itf,
+static void check_tx_queue(struct arsdk_cmd_itf1 *self,
 		const struct timespec *tsnow,
 		struct queue *queue,
 		int *next_timeout_ms)
@@ -392,7 +416,7 @@ again:
 				entry->retry_count >= max_retry_count) {
 			/* Max retry count reached, notify timeout and
 			 * continue with next entry in queue */
-			entry_notify(entry, itf,
+			entry_notify(entry, self,
 					ARSDK_CMD_ITF_SEND_STATUS_TIMEOUT, 1);
 			queue_pop(queue);
 			goto again;
@@ -402,7 +426,7 @@ again:
 		entry->waiting_ack = 0;
 		entry->retry_count++;
 		memset(&entry->sent_ts, 0, sizeof(entry->sent_ts));
-		itf->lnqlt.retry_count++;
+		self->lnqlt.retry_count++;
 	}
 
 	/* If delay between tx is not passed, compute next time of check */
@@ -434,13 +458,13 @@ again:
 	arsdk_transport_payload_init_with_buf(&payload, entry->cmd.buf);
 
 	/* Send it */
-	res = arsdk_transport_send_data(itf->transport, &header, &payload,
+	res = arsdk_transport_send_data(self->transport, &header, &payload,
 			NULL, 0);
 	arsdk_transport_payload_clear(&payload);
 	if (res < 0)
 		return;
 
-	entry_notify(entry, itf, ARSDK_CMD_ITF_SEND_STATUS_SENT,
+	entry_notify(entry, self, ARSDK_CMD_ITF_SEND_STATUS_SENT,
 			queue->info.type != ARSDK_TRANSPORT_DATA_TYPE_WITHACK);
 	queue->last_sent_ts = *tsnow;
 	if (queue->info.type == ARSDK_TRANSPORT_DATA_TYPE_WITHACK) {
@@ -461,7 +485,7 @@ again:
 
 /**
  */
-static void check_tx_queues(struct arsdk_cmd_itf *itf)
+static void check_tx_queues(struct arsdk_cmd_itf1 *self)
 {
 	int res = 0;
 	uint32_t i = 0;
@@ -475,18 +499,18 @@ static void check_tx_queues(struct arsdk_cmd_itf *itf)
 	}
 
 	/* Check all queues */
-	for (i = 0; i < itf->tx_count; i++) {
-		queue = itf->tx_queues[i];
-		check_tx_queue(itf, &tsnow, queue, &next_timeout_ms);
+	for (i = 0; i < self->tx_count; i++) {
+		queue = self->tx_queues[i];
+		check_tx_queue(self, &tsnow, queue, &next_timeout_ms);
 	}
 
 	/* Update next timeout */
 	if (next_timeout_ms > 0) {
-		res = pomp_timer_set(itf->timer, (uint32_t) next_timeout_ms);
+		res = pomp_timer_set(self->timer, (uint32_t) next_timeout_ms);
 		if (res < 0)
 			ARSDK_LOG_ERRNO("pomp_timer_set", -res);
 	} else {
-		res = pomp_timer_clear(itf->timer);
+		res = pomp_timer_clear(self->timer);
 		if (res < 0)
 			ARSDK_LOG_ERRNO("pomp_timer_clear", -res);
 	}
@@ -494,7 +518,7 @@ static void check_tx_queues(struct arsdk_cmd_itf *itf)
 
 /**
  */
-static void recv_ack(struct arsdk_cmd_itf *itf,
+static void recv_ack(struct arsdk_cmd_itf1 *self,
 		const struct arsdk_transport_header *header,
 		const struct arsdk_transport_payload *payload)
 {
@@ -513,10 +537,10 @@ static void recv_ack(struct arsdk_cmd_itf *itf,
 		return;
 	}
 	memcpy(&seq, payload->cdata, sizeof(uint8_t));
-	id = header->id - itf->ackoff;
+	id = header->id - self->ackoff;
 
-	for (i = 0; i < itf->tx_count; i++) {
-		queue = itf->tx_queues[i];
+	for (i = 0; i < self->tx_count; i++) {
+		queue = self->tx_queues[i];
 		if (queue->info.id != id)
 			continue;
 
@@ -538,8 +562,8 @@ static void recv_ack(struct arsdk_cmd_itf *itf,
 			return;
 		}
 
-		itf->lnqlt.ack_count++;
-		entry_notify(entry, itf,
+		self->lnqlt.ack_count++;
+		entry_notify(entry, self,
 				ARSDK_CMD_ITF_SEND_STATUS_ACK_RECEIVED, 1);
 		queue_pop(queue);
 		return;
@@ -550,7 +574,7 @@ static void recv_ack(struct arsdk_cmd_itf *itf,
 
 /**
  */
-static int send_ack(struct arsdk_cmd_itf *itf, uint8_t id, uint8_t seq)
+static int send_ack(struct arsdk_cmd_itf1 *self, uint8_t id, uint8_t seq)
 {
 	int res = 0;
 	struct arsdk_transport_header header;
@@ -559,12 +583,12 @@ static int send_ack(struct arsdk_cmd_itf *itf, uint8_t id, uint8_t seq)
 	/* Construct data with given frame's seq as data */
 	memset(&header, 0, sizeof(header));
 	header.type = ARSDK_TRANSPORT_DATA_TYPE_ACK;
-	header.id = id + itf->ackoff;
-	header.seq = itf->next_ack_seq++;
+	header.id = id + self->ackoff;
+	header.seq = self->next_ack_seq++;
 	arsdk_transport_payload_init_with_data(&payload, &seq, 1);
 
 	/* Send it */
-	res = arsdk_transport_send_data(itf->transport, &header, &payload,
+	res = arsdk_transport_send_data(self->transport, &header, &payload,
 			NULL, 0);
 	arsdk_transport_payload_clear(&payload);
 	return res;
@@ -574,7 +598,7 @@ static int send_ack(struct arsdk_cmd_itf *itf, uint8_t id, uint8_t seq)
  */
 static void link_quality_timer_cb(struct pomp_timer *timer, void *userdata)
 {
-	struct arsdk_cmd_itf *itf = userdata;
+	struct arsdk_cmd_itf1 *self = userdata;
 	int32_t tx_quality = -1;
 	uint32_t tx_sum = 0;
 
@@ -583,232 +607,65 @@ static void link_quality_timer_cb(struct pomp_timer *timer, void *userdata)
 	uint32_t rx_sum = 0;
 	int32_t rx_useful = -1;
 
-	ARSDK_RETURN_IF_FAILED(itf != NULL, -EINVAL);
+	ARSDK_RETURN_IF_FAILED(self != NULL, -EINVAL);
 
-	tx_sum = itf->lnqlt.retry_count + itf->lnqlt.ack_count;
+	tx_sum = self->lnqlt.retry_count + self->lnqlt.ack_count;
 	if (tx_sum > 0)
-		tx_quality = (itf->lnqlt.ack_count * 100) / tx_sum;
+		tx_quality = (self->lnqlt.ack_count * 100) / tx_sum;
 
-	recv_count = itf->lnqlt.rx_useful_count + itf->lnqlt.rx_useless_count;
+	recv_count = self->lnqlt.rx_useful_count + self->lnqlt.rx_useless_count;
 	if (recv_count > 0) {
-		rx_sum = itf->lnqlt.rx_miss_count + recv_count;
+		rx_sum = self->lnqlt.rx_miss_count + recv_count;
 
 		rx_quality = (recv_count * 100) / rx_sum;
 
-		rx_useful = (itf->lnqlt.rx_useful_count * 100) / recv_count;
+		rx_useful = (self->lnqlt.rx_useful_count * 100) / recv_count;
 	}
 
 	/* Link quality callback */
-	if (itf->cbs.link_quality)
-		(*itf->cbs.link_quality)(itf,
-				tx_quality,
-				rx_quality,
-				rx_useful,
-				itf->cbs.userdata);
+	if (self->itf_cbs.link_quality)
+		(*self->itf_cbs.link_quality)(self->itf, tx_quality, rx_quality,
+				rx_useful, self->itf_cbs.userdata);
 
 	/* Link quality reset */
-	itf->lnqlt.ack_count = 0;
-	itf->lnqlt.retry_count = 0;
-	itf->lnqlt.rx_useful_count = 0;
-	itf->lnqlt.rx_useless_count = 0;
-	itf->lnqlt.rx_miss_count = 0;
+	self->lnqlt.ack_count = 0;
+	self->lnqlt.retry_count = 0;
+	self->lnqlt.rx_useful_count = 0;
+	self->lnqlt.rx_useless_count = 0;
+	self->lnqlt.rx_miss_count = 0;
 }
 
 /**
  */
 static void timer_cb(struct pomp_timer *timer, void *userdata)
 {
-	struct arsdk_cmd_itf *itf = userdata;
-	check_tx_queues(itf);
+	struct arsdk_cmd_itf1 *self = userdata;
+	check_tx_queues(self);
 }
 
 /**
  */
-const char *arsdk_cmd_itf_send_status_str(enum arsdk_cmd_itf_send_status val)
-{
-	switch (val) {
-	case ARSDK_CMD_ITF_SEND_STATUS_SENT:
-		return "SENT";
-	case ARSDK_CMD_ITF_SEND_STATUS_ACK_RECEIVED:
-		return "ACK_RECEIVED";
-	case ARSDK_CMD_ITF_SEND_STATUS_TIMEOUT:
-		return "TIMEOUT";
-	case ARSDK_CMD_ITF_SEND_STATUS_CANCELED:
-		return "CANCELED";
-	default:
-		return "UNKNOWN";
-	}
-}
-
-/**
- */
-int arsdk_cmd_itf_new(struct arsdk_transport *transport,
-		const struct arsdk_cmd_itf_cbs *cbs,
-		const struct arsdk_cmd_itf_internal_cbs *internal_cbs,
-		const struct arsdk_cmd_queue_info *tx_info_table,
-		uint32_t tx_count,
-		uint8_t ackoff,
-		struct arsdk_cmd_itf **ret_itf)
-{
-	int res = 0;
-	uint32_t i = 0;
-	struct arsdk_cmd_itf *itf = NULL;
-
-	ARSDK_RETURN_ERR_IF_FAILED(ret_itf != NULL, -EINVAL);
-	*ret_itf = NULL;
-	ARSDK_RETURN_ERR_IF_FAILED(transport != NULL, -EINVAL);
-	ARSDK_RETURN_ERR_IF_FAILED(cbs != NULL, -EINVAL);
-	ARSDK_RETURN_ERR_IF_FAILED(cbs->recv_cmd != NULL, -EINVAL);
-	ARSDK_RETURN_ERR_IF_FAILED(internal_cbs != NULL, -EINVAL);
-	ARSDK_RETURN_ERR_IF_FAILED(internal_cbs->dispose != NULL, -EINVAL);
-
-	/* Allocate structure */
-	itf = calloc(1, sizeof(*itf));
-	if (itf == NULL)
-		return -ENOMEM;
-
-	/* Initialize structure */
-	itf->transport = transport;
-	itf->loop = arsdk_transport_get_loop(transport);
-	itf->cbs = *cbs;
-	itf->internal_cbs = *internal_cbs;
-	itf->ackoff = ackoff;
-
-	/* Initialize recv_seq to a non-zero values in order to accept the
-	   first data */
-	memset(itf->recv_seq, 0xff, sizeof(itf->recv_seq));
-
-	/* Create timer */
-	itf->timer = pomp_timer_new(itf->loop, &timer_cb, itf);
-	if (itf->timer == NULL) {
-		res = -ENOMEM;
-		goto error;
-	}
-
-	/* Create link quality timer */
-	itf->lnqlt.timer = pomp_timer_new(itf->loop,
-			&link_quality_timer_cb, itf);
-	if (itf->lnqlt.timer == NULL) {
-		res = -ENOMEM;
-		goto error;
-	}
-
-	/* Start link quality callback */
-	res = pomp_timer_set_periodic(itf->lnqlt.timer,
-			LINK_QUALITY_TIME_MS,
-			LINK_QUALITY_TIME_MS);
-	if (res < 0)
-		goto error;
-
-	/* Create tx queues */
-	itf->tx_queues = calloc(tx_count, sizeof(struct queue *));
-	if (itf->tx_queues == NULL) {
-		res = -ENOMEM;
-		goto error;
-	}
-	itf->tx_count = tx_count;
-	for (i = 0; i < tx_count; i++) {
-		res = queue_new(&tx_info_table[i], &itf->tx_queues[i]);
-		if (res < 0)
-			goto error;
-	}
-
-	*ret_itf = itf;
-	return 0;
-
-	/* Cleanup in case of error */
-error:
-	arsdk_cmd_itf_destroy(itf);
-	return res;
-}
-
-/**
- */
-int arsdk_cmd_itf_destroy(struct arsdk_cmd_itf *itf)
-{
-	int res = 0;
-	uint32_t i = 0;
-
-	ARSDK_RETURN_ERR_IF_FAILED(itf != NULL, -EINVAL);
-
-	/* Stop queues */
-	arsdk_cmd_itf_stop(itf);
-
-	/* Notify internal callbacks */
-	(*itf->internal_cbs.dispose)(itf, itf->internal_cbs.userdata);
-
-	/* Notify command interface callback */
-	if (itf->cbs.dispose)
-		(*itf->cbs.dispose)(itf, itf->cbs.userdata);
-
-	/* Free tx queues */
-	if (itf->tx_queues != NULL) {
-		for (i = 0; i < itf->tx_count; i++) {
-			if (itf->tx_queues[i] != NULL) {
-				res = queue_destroy(itf->tx_queues[i], itf);
-				if (res < 0)
-					return res;
-				itf->tx_queues[i] = NULL;
-			}
-		}
-		free(itf->tx_queues);
-	}
-
-	/* Free timer */
-	if (itf->timer != NULL)
-		pomp_timer_destroy(itf->timer);
-
-	/* Stop link quality timer */
-	res = pomp_timer_clear(itf->lnqlt.timer);
-	if (res < 0)
-		ARSDK_LOG_ERRNO("pomp_timer_clear", -res);
-	/* Free link quality timer */
-	if (itf->lnqlt.timer != NULL)
-		pomp_timer_destroy(itf->lnqlt.timer);
-
-	free(itf);
-	return 0;
-}
-
-/**
- */
-int arsdk_cmd_itf_set_osdata(struct arsdk_cmd_itf *itf, void *userdata)
-{
-	ARSDK_RETURN_ERR_IF_FAILED(itf != NULL, -EINVAL);
-	itf->osdata = userdata;
-	return 0;
-}
-
-/**
- */
-void *arsdk_cmd_itf_get_osdata(struct arsdk_cmd_itf *itf)
-{
-	return itf == NULL ? NULL : itf->osdata;
-}
-
-/**
- */
-int arsdk_cmd_itf_stop(struct arsdk_cmd_itf *itf)
+int arsdk_cmd_itf1_stop(struct arsdk_cmd_itf1 *self)
 {
 	uint32_t i = 0;
 
-	ARSDK_RETURN_ERR_IF_FAILED(itf != NULL, -EINVAL);
+	ARSDK_RETURN_ERR_IF_FAILED(self != NULL, -EINVAL);
 
 	/* Stop tx queues */
-	if (itf->tx_queues != NULL) {
-		for (i = 0; i < itf->tx_count; i++) {
-			if (itf->tx_queues[i] != NULL)
-				queue_stop(itf->tx_queues[i], itf);
+	if (self->tx_queues != NULL) {
+		for (i = 0; i < self->tx_count; i++) {
+			if (self->tx_queues[i] != NULL)
+				queue_stop(self->tx_queues[i], self);
 		}
 	}
 
-	itf->transport = NULL;
+	self->transport = NULL;
 	return 0;
 }
 
 /**
  */
-int arsdk_cmd_itf_send(struct arsdk_cmd_itf *itf,
+int arsdk_cmd_itf1_send(struct arsdk_cmd_itf1 *self,
 		const struct arsdk_cmd *cmd,
 		arsdk_cmd_itf_send_status_cb_t send_status,
 		void *userdata)
@@ -816,44 +673,43 @@ int arsdk_cmd_itf_send(struct arsdk_cmd_itf *itf,
 	int res = 0;
 	struct queue *queue = NULL;
 
-	ARSDK_RETURN_ERR_IF_FAILED(itf != NULL, -EINVAL);
 	ARSDK_RETURN_ERR_IF_FAILED(cmd != NULL, -EINVAL);
+	ARSDK_RETURN_ERR_IF_FAILED(self != NULL, -EINVAL);
 
-	if (itf->transport == NULL)
+	if (self->transport == NULL)
 		return -EPIPE;
 
-	arsdk_cmd_itf_cmd_log(itf, cmd, ARSDK_CMD_DIR_TX);
+	cmd_log(self, cmd, ARSDK_CMD_DIR_TX);
 
 	/* Use default callback if none given */
 	if (send_status == NULL) {
-		send_status = itf->cbs.send_status;
-		userdata = itf->cbs.userdata;
+		send_status = self->itf_cbs.send_status;
+		userdata = self->itf_cbs.userdata;
 	}
 
 	/* Determine queue where to put command */
-	queue = find_tx_queue(itf, cmd);
+	queue = find_tx_queue(self, cmd);
 	if (queue == NULL)
 		return -EINVAL;
 
 	/* Add in tx queue */
-	res = queue_add(queue, itf, cmd, send_status, userdata);
+	res = queue_add(queue, self, cmd, send_status, userdata);
 	if (res < 0)
 		return res;
 
 	/* Check if something can be sent now */
-	check_tx_queues(itf);
+	check_tx_queues(self);
 	return 0;
 }
 
-static int arsdk_cmd_itf_should_process_data(struct arsdk_cmd_itf *itf,
-					     uint8_t id,
-					     uint8_t seq)
+static int should_process_data(struct arsdk_cmd_itf1 *self, uint8_t id,
+		uint8_t seq)
 {
-	uint8_t prev = itf->recv_seq[id];
+	uint8_t prev = self->recv_seq[id];
 	int diff = seq - prev;
 	if ((diff > 0) /* newer */ ||
 	    (diff < -10) /* loop */) {
-		itf->recv_seq[id] = seq;
+		self->recv_seq[id] = seq;
 		return 1;
 	} else {
 		return 0;
@@ -862,26 +718,26 @@ static int arsdk_cmd_itf_should_process_data(struct arsdk_cmd_itf *itf,
 
 /**
  */
-static void arsdk_cmd_itf_lnqlt_rx_update(struct arsdk_cmd_itf *itf,
+static void lnqlt_rx_update(struct arsdk_cmd_itf1 *self,
 		const struct arsdk_transport_header *header)
 {
-	int diff = header->seq - itf->recv_seq[header->id];
+	int diff = header->seq - self->recv_seq[header->id];
 
 	/* loop */
 	if (diff < -10)
 		diff += 256;
 
 	if (diff > 0) {
-		itf->lnqlt.rx_miss_count += (diff-1);
-		itf->lnqlt.rx_useful_count++;
+		self->lnqlt.rx_miss_count += (diff-1);
+		self->lnqlt.rx_useful_count++;
 	} else {
-		itf->lnqlt.rx_useless_count++;
+		self->lnqlt.rx_useless_count++;
 	}
 }
 
 /**
  */
-int arsdk_cmd_itf_recv_data(struct arsdk_cmd_itf *itf,
+int arsdk_cmd_itf1_recv_data(struct arsdk_cmd_itf1 *self,
 		const struct arsdk_transport_header *header,
 		const struct arsdk_transport_payload *payload)
 {
@@ -889,31 +745,30 @@ int arsdk_cmd_itf_recv_data(struct arsdk_cmd_itf *itf,
 	struct arsdk_cmd cmd;
 	struct pomp_buffer *buf = NULL;
 
-	ARSDK_RETURN_ERR_IF_FAILED(itf != NULL, -EINVAL);
 	ARSDK_RETURN_ERR_IF_FAILED(header != NULL, -EINVAL);
 	ARSDK_RETURN_ERR_IF_FAILED(payload != NULL, -EINVAL);
 
-	if (itf->transport == NULL)
+	if (self->transport == NULL)
 		return -EPIPE;
 
 	/* Update of the reception link quality */
-	arsdk_cmd_itf_lnqlt_rx_update(itf, header);
+	lnqlt_rx_update(self, header);
 
 	/* Handle ACK frame and re-check tx queues */
 	if (header->type == ARSDK_TRANSPORT_DATA_TYPE_ACK) {
-		recv_ack(itf, header, payload);
-		check_tx_queues(itf);
+		recv_ack(self, header, payload);
+		check_tx_queues(self);
 		/* Update last sequence number received */
-		itf->recv_seq[header->id] = header->seq;
+		self->recv_seq[header->id] = header->seq;
 		return 0;
 	}
 
 	/* Send ACK if needed */
 	if (header->type == ARSDK_TRANSPORT_DATA_TYPE_WITHACK)
-		send_ack(itf, header->id, header->seq);
+		send_ack(self, header->id, header->seq);
 
 	/* If the sequence number was already handled, stop processing here */
-	if (!arsdk_cmd_itf_should_process_data(itf, header->id, header->seq))
+	if (!should_process_data(self, header->id, header->seq))
 		return 0;
 
 	/* Initialize command with buffer of frame */
@@ -952,8 +807,9 @@ int arsdk_cmd_itf_recv_data(struct arsdk_cmd_itf *itf,
 	if (res < 0) {
 		ARSDK_LOG_ERRNO("arsdk_cmd_dec_header", -res);
 	} else {
-		arsdk_cmd_itf_cmd_log(itf, &cmd, ARSDK_CMD_DIR_RX);
-		(*itf->cbs.recv_cmd)(itf, &cmd, itf->cbs.userdata);
+		cmd_log(self, &cmd, ARSDK_CMD_DIR_RX);
+		(*self->itf_cbs.recv_cmd)(self->itf, &cmd,
+				self->itf_cbs.userdata);
 	}
 
 	/* Cleanup command */
@@ -961,21 +817,131 @@ int arsdk_cmd_itf_recv_data(struct arsdk_cmd_itf *itf,
 	return res;
 }
 
-const char *arsdk_arg_type_str(enum arsdk_arg_type val)
+/**
+ */
+int arsdk_cmd_itf1_new(struct arsdk_transport *transport,
+		const struct arsdk_cmd_itf1_cbs *cbs,
+		const struct arsdk_cmd_itf_cbs *itf_cbs,
+		struct arsdk_cmd_itf *itf,
+		const struct arsdk_cmd_queue_info *tx_info_table,
+		uint32_t tx_count,
+		uint8_t ackoff,
+		struct arsdk_cmd_itf1 **ret_obj)
 {
-	switch (val) {
-	case ARSDK_ARG_TYPE_I8: return "i8";
-	case ARSDK_ARG_TYPE_U8: return "u8";
-	case ARSDK_ARG_TYPE_I16: return "i16";
-	case ARSDK_ARG_TYPE_U16: return "u16";
-	case ARSDK_ARG_TYPE_I32: return "i32";
-	case ARSDK_ARG_TYPE_U32: return "u32";
-	case ARSDK_ARG_TYPE_I64: return "i64";
-	case ARSDK_ARG_TYPE_U64: return "u64";
-	case ARSDK_ARG_TYPE_FLOAT: return "float";
-	case ARSDK_ARG_TYPE_DOUBLE: return "double";
-	case ARSDK_ARG_TYPE_STRING: return "string";
-	case ARSDK_ARG_TYPE_ENUM: return "enum";
-	default: return "unknown";
+	int res = 0;
+	uint32_t i = 0;
+	struct arsdk_cmd_itf1 *self = NULL;
+
+	ARSDK_RETURN_ERR_IF_FAILED(ret_obj != NULL, -EINVAL);
+	*ret_obj = NULL;
+	ARSDK_RETURN_ERR_IF_FAILED(transport != NULL, -EINVAL);
+	ARSDK_RETURN_ERR_IF_FAILED(cbs != NULL, -EINVAL);
+	ARSDK_RETURN_ERR_IF_FAILED(cbs->dispose != NULL, -EINVAL);
+	ARSDK_RETURN_ERR_IF_FAILED(itf_cbs != NULL, -EINVAL);
+	ARSDK_RETURN_ERR_IF_FAILED(itf_cbs->recv_cmd != NULL, -EINVAL);
+
+	/* Allocate structure */
+	self = calloc(1, sizeof(*self));
+	if (self == NULL)
+		return -ENOMEM;
+
+	/* Initialize structure */
+	self->transport = transport;
+	self->loop = arsdk_transport_get_loop(transport);
+	self->cbs = *cbs;
+	self->itf_cbs = *itf_cbs;
+	self->itf = itf;
+	self->ackoff = ackoff;
+
+	/* Initialize recv_seq to a non-zero values in order to accept the
+	   first data */
+	memset(self->recv_seq, 0xff, sizeof(self->recv_seq));
+
+	/* Create timer */
+	self->timer = pomp_timer_new(self->loop, &timer_cb, self);
+	if (self->timer == NULL) {
+		res = -ENOMEM;
+		goto error;
 	}
+
+	/* Create link quality timer */
+	self->lnqlt.timer = pomp_timer_new(self->loop,
+			&link_quality_timer_cb, self);
+	if (self->lnqlt.timer == NULL) {
+		res = -ENOMEM;
+		goto error;
+	}
+
+	/* Start link quality callback */
+	res = pomp_timer_set_periodic(self->lnqlt.timer,
+			LINK_QUALITY_TIME_MS,
+			LINK_QUALITY_TIME_MS);
+	if (res < 0)
+		goto error;
+
+	/* Create tx queues */
+	self->tx_queues = calloc(tx_count, sizeof(struct queue *));
+	if (self->tx_queues == NULL) {
+		res = -ENOMEM;
+		goto error;
+	}
+	self->tx_count = tx_count;
+	for (i = 0; i < tx_count; i++) {
+		res = queue_new(&tx_info_table[i], &self->tx_queues[i]);
+		if (res < 0)
+			goto error;
+	}
+
+	*ret_obj = self;
+	return 0;
+
+	/* Cleanup in case of error */
+error:
+	arsdk_cmd_itf1_destroy(self);
+	return res;
+}
+
+/**
+ */
+int arsdk_cmd_itf1_destroy(struct arsdk_cmd_itf1 *self)
+{
+	int res = 0;
+	uint32_t i = 0;
+
+	ARSDK_RETURN_ERR_IF_FAILED(self != NULL, -EINVAL);
+
+	/* Stop queues */
+	arsdk_cmd_itf1_stop(self);
+
+	/* Notify command interface callback */
+	if (self->cbs.dispose)
+		(*self->cbs.dispose)(self, self->cbs.userdata);
+
+	/* Free tx queues */
+	if (self->tx_queues != NULL) {
+		for (i = 0; i < self->tx_count; i++) {
+			if (self->tx_queues[i] != NULL) {
+				res = queue_destroy(self->tx_queues[i], self);
+				if (res < 0)
+					return res;
+				self->tx_queues[i] = NULL;
+			}
+		}
+		free(self->tx_queues);
+	}
+
+	/* Free timer */
+	if (self->timer != NULL)
+		pomp_timer_destroy(self->timer);
+
+	/* Stop link quality timer */
+	res = pomp_timer_clear(self->lnqlt.timer);
+	if (res < 0)
+		ARSDK_LOG_ERRNO("pomp_timer_clear", -res);
+	/* Free link quality timer */
+	if (self->lnqlt.timer != NULL)
+		pomp_timer_destroy(self->lnqlt.timer);
+
+	free(self);
+	return 0;
 }

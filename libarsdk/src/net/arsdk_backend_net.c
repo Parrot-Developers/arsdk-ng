@@ -67,6 +67,12 @@ struct arsdk_peer_conn {
 	int                                    qos_mode_supported;
 	int                                    qos_mode;
 	int                                    stream_supported;
+	/** minimum protocol version supported */
+	uint32_t                               proto_v_min;
+	/** maximum protocol version supported */
+	uint32_t                               proto_v_max;
+	/** protocol version used */
+	uint32_t                               proto_v;
 };
 
 /** */
@@ -78,6 +84,11 @@ struct arsdk_backend_net {
 	arsdk_backend_net_socket_cb_t          socketcb;
 	/* User data for socket hook callback */
 	void                                   *userdata;
+
+	/** minimum protocol version supported */
+	uint32_t                               proto_v_min;
+	/** maximum protocol version supported */
+	uint32_t                               proto_v_max;
 
 	int                                    qos_mode_supported;
 	int                                    stream_supported;
@@ -99,6 +110,10 @@ struct arsdk_req {
 	char      *device_id;
 	char      *json;
 	int       qos_mode;
+	/** minimum protocol version supported */
+	uint32_t  proto_v_min;
+	/** maximum protocol version supported */
+	uint32_t  proto_v_max;
 };
 
 static void arsdk_backend_net_socket_cb(struct arsdk_backend *base, int fd,
@@ -146,6 +161,32 @@ static int parse_port(json_object *jroot, const char *key, uint16_t *port)
 
 	*port = (uint16_t)value;
 	return 0;
+}
+
+/**
+ */
+static void parse_proto_versions(json_object *object,
+		uint32_t *v_min, uint32_t *v_max)
+{
+	/* by default only the protocol version 1 is considered as supported */
+	uint32_t proto_v_min = 1;
+	uint32_t proto_v_max = 1;
+	json_object *jobj = NULL;
+
+	if (!object)
+		goto out;
+
+	jobj = get_json_object(object, ARSDK_CONN_JSON_KEY_PROTO_V_MIN);
+	if (jobj != NULL)
+		proto_v_min = json_object_get_int(jobj);
+
+	jobj = get_json_object(object, ARSDK_CONN_JSON_KEY_PROTO_V_MAX);
+	if (jobj != NULL)
+		proto_v_max = json_object_get_int(jobj);
+
+out:
+	*v_min = proto_v_min;
+	*v_max = proto_v_max;
 }
 
 /**
@@ -240,6 +281,10 @@ static int peer_conn_req_parse(
 	 * if not present QOS is unsupported by the peer */
 	req->qos_mode = parse_qos_mode(jroot);
 
+	/* Parse supported protocol versions:
+	 * by default only the protocol version 1 is considered as supported */
+	parse_proto_versions(jroot, &req->proto_v_min, &req->proto_v_max);
+
 	/* Success */
 	json_object_put(jroot);
 	return 0;
@@ -274,6 +319,7 @@ static int peer_conn_setup_transport(struct arsdk_peer_conn *self,
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.data.rx_port = ARSDK_NET_DEFAULT_C2D_DATA_PORT;
 	cfg.stream_supported = backend_net->stream_supported;
+	cfg.proto_v = self->proto_v;
 
 	/* Create transport */
 	memset(&transport_net_cbs, 0, sizeof(transport_net_cbs));
@@ -333,6 +379,10 @@ static int peer_conn_send_json(struct arsdk_peer_conn *self,
 	/* Add chosen QOS mode */
 	json_object_object_add(jroot, ARSDK_CONN_JSON_KEY_QOS_MODE,
 			       json_object_new_int(self->qos_mode));
+
+	/* Add protocol version to use */
+	json_object_object_add(jroot, ARSDK_CONN_JSON_KEY_PROTO_V,
+			json_object_new_int(self->proto_v));
 
 	/* Get updated json */
 	newjson = json_object_to_json_string(jroot);
@@ -396,6 +446,8 @@ static int peer_conn_destroy(struct arsdk_peer_conn *self)
  */
 static int peer_conn_new(struct arsdk_backend_net *backend,
 		struct pomp_conn *conn,
+		uint32_t proto_v_min,
+		uint32_t proto_v_max,
 		int qos_mode_supported,
 		int stream_supported,
 		struct arsdk_peer_conn **ret_conn)
@@ -414,6 +466,8 @@ static int peer_conn_new(struct arsdk_backend_net *backend,
 	self->loop = backend->loop;
 	self->conn = conn;
 	self->state = PEER_CONN_STATE_PENDING;
+	self->proto_v_min = proto_v_min;
+	self->proto_v_max = proto_v_max;
 	self->qos_mode_supported = qos_mode_supported;
 	self->stream_supported = stream_supported;
 	*ret_conn = self;
@@ -458,6 +512,7 @@ static void backend_net_event_cb(struct pomp_ctx *ctx,
 			self->listen.conn = NULL;
 		}
 		if (peer_conn_new(self, conn,
+				self->proto_v_min, self->proto_v_max,
 				self->qos_mode_supported,
 				self->stream_supported,
 				&self->listen.conn) < 0) {
@@ -500,6 +555,8 @@ static void backend_net_raw_cb(struct pomp_ctx *ctx,
 	struct arsdk_peer_info info;
 	const struct arsdk_peer_info *pinfo = NULL;
 	char ip[128] = "";
+	int proto_v_min;
+	int proto_v_max;
 
 	memset(&req, 0, sizeof(req));
 	memset(&info, 0, sizeof(info));
@@ -532,6 +589,22 @@ static void backend_net_raw_cb(struct pomp_ctx *ctx,
 	if (res < 0)
 		goto out;
 
+	/* choose the real protocol version according to
+	 * the protocol versions supported by the peer and the backend */
+	proto_v_min = MAX(req.proto_v_min, self->listen.conn->proto_v_min);
+	proto_v_max = MIN(req.proto_v_max, self->listen.conn->proto_v_max);
+	if (proto_v_min > proto_v_max) {
+		ARSDK_LOGW("peer protocol versions supported[%d:%d] "
+			   "don't match with "
+			   "backend protocol versions supported[%d:%d]",
+			   req.proto_v_min,
+			   req.proto_v_max,
+			   self->listen.conn->proto_v_min,
+			   self->listen.conn->proto_v_max);
+		goto out;
+	}
+	self->listen.conn->proto_v = proto_v_max;
+
 	/* choose the real qos_mode according to
 	 * the qos_mode requested by the peer and the qos_mode supported */
 	if (req.qos_mode != self->listen.conn->qos_mode_supported) {
@@ -547,6 +620,7 @@ static void backend_net_raw_cb(struct pomp_ctx *ctx,
 	self->listen.conn->d2c_data_port = req.d2c_data_port;
 	self->listen.conn->d2c_rtp_port = req.d2c_rtp_port;
 	self->listen.conn->d2c_rtcp_port = req.d2c_rtcp_port;
+	info.proto_v = proto_v_max;
 	info.ctrl_name = req.ctrl_name;
 	info.ctrl_type = req.ctrl_type;
 	info.ctrl_addr = ip;
@@ -823,6 +897,16 @@ int arsdk_backend_net_new(struct arsdk_mngr *mngr,
 	ARSDK_RETURN_ERR_IF_FAILED(ret_obj != NULL, -EINVAL);
 	*ret_obj = NULL;
 	ARSDK_RETURN_ERR_IF_FAILED(cfg != NULL, -EINVAL);
+#if ARSDK_BACKEND_NET_PROTO_MIN > 1
+	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_min == 0 ||
+			cfg->proto_v_min >= ARSDK_BACKEND_NET_PROTO_MIN,
+			-EINVAL);
+#endif
+	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_max == 0 ||
+			cfg->proto_v_max <= ARSDK_BACKEND_NET_PROTO_MAX,
+			-EINVAL);
+	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_min <= cfg->proto_v_max,
+			-EINVAL);
 
 	/* Allocate structure */
 	self = calloc(1, sizeof(*self));
@@ -840,6 +924,13 @@ int arsdk_backend_net_new(struct arsdk_mngr *mngr,
 	self->iface = xstrdup(cfg->iface);
 	self->qos_mode_supported = cfg->qos_mode_supported;
 	self->stream_supported = cfg->stream_supported;
+	self->proto_v_min = cfg->proto_v_min;
+	self->proto_v_max = cfg->proto_v_max;
+	/* by default all protocol versions implemented are supported */
+	self->proto_v_min = cfg->proto_v_min != 0 ? self->proto_v_min :
+			ARSDK_BACKEND_NET_PROTO_MIN;
+	self->proto_v_max = cfg->proto_v_max != 0 ? self->proto_v_max :
+			ARSDK_BACKEND_NET_PROTO_MAX;
 
 	/* Success */
 	*ret_obj = self;

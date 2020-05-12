@@ -27,6 +27,11 @@
 #ifndef _ARSDKCTRL_BACKEND_NET_H_
 #define _ARSDKCTRL_BACKEND_NET_H_
 
+/** minimum protocol version implemented */
+#define ARSDKCTRL_BACKEND_NET_PROTO_MIN ARSDK_PROTOCOL_VERSION_1
+/** maximum protocol version implemented */
+#define ARSDKCTRL_BACKEND_NET_PROTO_MAX ARSDK_PROTOCOL_VERSION_2
+
 /** */
 struct arsdkctrl_backend_net;
 
@@ -34,12 +39,30 @@ struct arsdkctrl_backend_net;
 struct arsdkctrl_backend_net_cfg {
 	const char        *iface;
 	int               qos_mode_supported;
-	/* stream internal support:
+	/**
+	 * stream internal support:
 	 * - Set to 1 to internally handle default streaming channel (port
 	 *   allocation and exchange in json)
 	 * - Set to 0 to handle it externally (no port allocation nor automatic
-	 *   exchange in json, it is up to application to do it) */
+	 *   exchange in json, it is up to application to do it)
+	 */
 	int               stream_supported;
+	/**
+	 * minimum protocol version supported.
+	 * must be equal or greater than 'ARSDKCTRL_BACKEND_NET_PROTO_MIN';
+	 * be equal or less than 'ARSDKCTRL_BACKEND_NET_PROTO_MAX' and
+	 * be equal or less than 'proto_v_max'.
+	 * '0' is considered as 'ARSDKCTRL_BACKEND_NET_PROTO_MIN'.
+	 */
+	uint32_t          proto_v_min;
+	/**
+	 * Maximum protocol version supported.
+	 * Must be equal or greater than 'ARSDKCTRL_BACKEND_NET_PROTO_MIN';
+	 * be equal or less than 'ARSDKCTRL_BACKEND_NET_PROTO_MAX' and
+	 * be equal or greater than 'proto_v_min'.
+	 * '0' is considered as 'ARSDKCTRL_BACKEND_NET_PROTO_MAX'.
+	 */
+	uint32_t          proto_v_max;
 };
 
 /** */

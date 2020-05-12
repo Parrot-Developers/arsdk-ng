@@ -33,7 +33,9 @@ LOCAL_CFLAGS := -DARSDK_API_EXPORTS -fvisibility=hidden
 
 LOCAL_SRC_FILES := \
 	libarsdk/src/arsdk_backend.c \
-	libarsdk/src/arsdk_cmd_itf.c \
+	libarsdk/src/cmd_itf/arsdk_cmd_itf.c \
+	libarsdk/src/cmd_itf/arsdk_cmd_itf1.c \
+	libarsdk/src/cmd_itf/arsdk_cmd_itf2.c \
 	libarsdk/src/arsdk_decoder.c \
 	libarsdk/src/arsdk_mngr.c \
 	libarsdk/src/arsdk_encoder.c \
@@ -175,11 +177,11 @@ LOCAL_LIBRARIES += libarsdk \
 	libpomp \
 	json \
 	libfutils \
-	libmux \
-	libpuf
+	libmux
 
 LOCAL_CONDITIONAL_LIBRARIES += \
-	OPTIONAL:avahi-client
+	OPTIONAL:avahi-client \
+	OPTIONAL:libpuf
 
 ifeq ("$(TARGET_OS)","windows")
   LOCAL_LDLIBS += -lws2_32

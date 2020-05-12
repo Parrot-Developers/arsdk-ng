@@ -410,8 +410,6 @@ static const char *get_file_name(enum arsdk_device_type dev_type)
 		{ARSDK_DEVICE_TYPE_BEBOP, "bebopdrone_update.plf"},
 		{ARSDK_DEVICE_TYPE_BEBOP_2, "bebop2_update.plf"},
 		{ARSDK_DEVICE_TYPE_PAROS, "paros_update.plf"},
-		{ARSDK_DEVICE_TYPE_ANAFI4K, "anafi4k_update.tar"},
-		{ARSDK_DEVICE_TYPE_ANAFI_THERMAL, "anafithermal_update.tar"},
 		{ARSDK_DEVICE_TYPE_CHIMERA, "chimera_update.plf"},
 		{ARSDK_DEVICE_TYPE_SKYCTRL, "nap_update.plf"},
 		{ARSDK_DEVICE_TYPE_SKYCTRL_2, "mpp_update.plf"},
@@ -511,6 +509,10 @@ int arsdk_updater_transport_ftp_create_req_upload(
 
 	/* upload updater file */
 	req_upload->fw.file_name = get_file_name(dev_type);
+	if (req_upload->fw.file_name == NULL) {
+		res = -ENOENT;
+		goto error;
+	}
 	snprintf(remote_update_path, sizeof(remote_update_path),
 			"/%s.tmp", req_upload->fw.file_name);
 

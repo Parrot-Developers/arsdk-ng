@@ -46,6 +46,7 @@
 #endif /* !_MSC_VER */
 
 #include <libpomp.h>
+#include <futils/futils.h>
 #include <futils/timetools.h>
 
 /* Public headers */
@@ -55,7 +56,7 @@
 /* Private headers */
 #include "arsdk_list.h"
 #include "arsdk_transport_ids.h"
-#include "arsdk_cmd_itf_priv.h"
+#include "cmd_itf/arsdk_cmd_itf_priv.h"
 
 /** Endianess detection */
 #if !defined(ARSDK_LITTLE_ENDIAN) && !defined(ARSDK_BIG_ENDIAN)
@@ -125,27 +126,21 @@ typedef _W64 signed int ssize_t;
 #  endif /* !_WIN64 */
 #endif /* _MSC_VER */
 
+/* forward declarations */
+struct arsdk_cmd_itf1;
+struct arsdk_cmd_itf2;
+
 /** */
 struct arsdk_cmd_itf {
 	void                               *osdata;
 	struct arsdk_cmd_itf_cbs           cbs;
 	struct arsdk_cmd_itf_internal_cbs  internal_cbs;
-	struct arsdk_transport             *transport;
-	struct pomp_loop                   *loop;
-	struct pomp_timer                  *timer;
-	struct queue                       **tx_queues;
-	uint32_t                           tx_count;
-	uint8_t                            ackoff;
-	uint8_t                            next_ack_seq;
-	uint8_t                            recv_seq[UINT8_MAX+1];
-	struct {
-		struct pomp_timer          *timer;
-		uint32_t                   retry_count;
-		uint32_t                   ack_count;
-		uint32_t                   rx_miss_count;
-		uint32_t                   rx_useless_count;
-		uint32_t                   rx_useful_count;
-	} lnqlt;
+	/** protocol version */
+	uint32_t                           proto_v;
+	union {
+		struct arsdk_cmd_itf1      *v1;
+		struct arsdk_cmd_itf2      *v2;
+	} core;
 };
 
 /** peer */

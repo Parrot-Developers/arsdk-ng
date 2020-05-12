@@ -28,9 +28,11 @@
 #include "arsdk_net.h"
 #include "arsdk_net_log.h"
 
-#define ARSDK_FRAME_HEADER_SIZE      7
-#define ARSDK_TRANSPORT_PING_PERIOD  2000
-#define ARSDK_TRANSPORT_TAG          "net"
+#define ARSDK_FRAME_V1_HEADER_SIZE      7
+#define ARSDK_FRAME_V2_HEADER_SIZE_MIN  6
+#define ARSDK_FRAME_V2_HEADER_SIZE_MAX  14
+#define ARSDK_TRANSPORT_PING_PERIOD     2000
+#define ARSDK_TRANSPORT_TAG             "net"
 
 /**
  * Determine if a read/write error in non-blocking could not be completed.
@@ -414,17 +416,247 @@ static ssize_t socket_write(struct arsdk_transport_net *self,
 #endif /* !_WIN32 */
 
 /**
+ * Reads a variable unsigned integer from data.
+ *
+ * @param src : Source where read.
+ * @param src_len : Source length.
+ * @param val[out] : Value read.
+ * @param val_len[out] : Length in byte read from the source.
+ *
+ * @return 0 in case of success, negative errno value in case of error.
+ */
+static int read_varuint(const uint8_t *src, size_t src_len,
+		uint32_t *val, size_t *val_len)
+{
+	uint32_t shift = 0;
+	size_t offset = 0;
+	int more = 0;
+
+	if (src_len == 0)
+		return -EINVAL;
+
+	*val = 0;
+	/* Decode value */
+	do {
+		*val |= (((uint32_t)(src[offset] & 0x7f)) << shift);
+		more = src[offset] & 0x80;
+
+		offset++;
+		shift += 7;
+		if ((offset > src_len) ||
+		    (offset > 5) ||
+		    (offset == 5 && src[offset] & 0x0f))
+			return -EPROTO;
+	} while (more);
+
+	*val_len = offset;
+	return 0;
+}
+
+/**
+ * Writes a variable unsigned integer in data.
+ *
+ * @param dst : Destination where write.
+ * @param dst_len : Destination length ; should be greater or equal to 5.
+ * @param val : Value to write.
+ * @param val_len[out] : Length in byte written in the destination.
+ *
+ * @return 0 in case of success, negative errno value in case of error.
+ */
+static int write_varuint(uint8_t *dst, size_t dst_len,
+		uint32_t val, size_t *val_len)
+{
+	uint8_t data[5];
+	size_t off = 0;
+	uint8_t byte = 0;
+	int more = 0;
+
+	if (dst_len < 5)
+		return -EINVAL;
+
+	/* Process value, use logical right shift without sign propagation */
+	do {
+		byte = val & 0x7f;
+		val >>= 7;
+		more = (val != 0);
+		if (more)
+			byte |= 0x80;
+		data[off++] = byte;
+	} while (more);
+
+	memcpy(dst, data, off);
+	*val_len = off;
+	return 0;
+}
+
+/**
+ * Decodes protocol v1 header
+ *
+ * @param headerbuf : Data to read.
+ * @param header[out] : Header to fill with data.
+ * @param payload_len[out] : Payload length read from data.
+ *
+ * @return 0 in case of success, negative errno value in case of error.
+ * @see ARSDK_PROTOCOL_VERSION_1
+ */
+static int decode_header_v1(const uint8_t *headerbuf,
+		struct arsdk_transport_header *header, uint32_t *payload_len)
+{
+	uint32_t frame_len;
+
+	/* Type less than ARSDK_TRANSPORT_DATA_TYPE_MAX */
+	if (headerbuf[0] >= ARSDK_TRANSPORT_DATA_TYPE_MAX)
+		return -EPROTO;
+
+	header->type = headerbuf[0];
+	header->id = headerbuf[1];
+	/* Sequence number in 8 bits */
+	header->seq = headerbuf[2];
+
+	/* Frame size in 32 bits */
+	frame_len = headerbuf[3] |
+		      (headerbuf[4] << 8) |
+		      (headerbuf[5] << 16) |
+		      (headerbuf[6] << 24);
+	if (frame_len < ARSDK_FRAME_V1_HEADER_SIZE)
+		return -EPROTO;
+
+	*payload_len = frame_len - ARSDK_FRAME_V1_HEADER_SIZE;
+	return 0;
+}
+
+/**
+ * Reads protocol version from data.
+ *
+ * @param src : Source where read.
+ * @param src_len : Source length.
+ * @param proto_v[out] : Protocol version read.
+ * @param proto_v_len[out] : Length in byte read from the source.
+ *
+ * @return 0 in case of success, negative errno value in case of error.
+ */
+static int read_proto_v(const uint8_t *src, size_t src_len,
+		uint32_t *proto_v, size_t *proto_v_len)
+{
+	int res = read_varuint(src, src_len, proto_v, proto_v_len);
+	if (res < 0)
+		return res;
+
+	/* If version is less than the offset, it is the protocol version 1
+	   and there is no protocol version data. */
+	if (*proto_v < ARSDK_TRANSPORT_DATA_TYPE_MAX) {
+		*proto_v = ARSDK_PROTOCOL_VERSION_1;
+		*proto_v_len = 0;
+		return 0;
+	}
+
+	/* Subtract protocol version offset */
+	*proto_v -= ARSDK_TRANSPORT_DATA_TYPE_MAX;
+	return 0;
+}
+
+/**
+ * Writes protocol version in data.
+ *
+ * @param dst : Destination where write.
+ * @param dst_len : Destination length ; should be greater or equal to 5.
+ * @param proto_v : Protocol version to write.
+ *        Should be less than "UINT32_MAX - ARSDK_TRANSPORT_DATA_TYPE_MAX".
+ * @param proto_v_len[out] : Length in byte written in the destination.
+ *
+ * @return 0 in case of success, negative errno value in case of error.
+ */
+static int write_proto_v(uint8_t *dst, size_t dst_len,
+		uint32_t proto_v, size_t *proto_v_len)
+{
+	if (proto_v > UINT32_MAX - ARSDK_TRANSPORT_DATA_TYPE_MAX)
+		return -EINVAL;
+
+	/* Protocol version with offset */
+	return write_varuint(dst, dst_len,
+			proto_v + ARSDK_TRANSPORT_DATA_TYPE_MAX,
+			proto_v_len);
+}
+
+/**
+ * Decodes protocol v2 header
+ *
+ * @param buf : Data to read.
+ * @param len : Data size.
+ * @param header[out] : Header to fill with data.
+ * @param header_len[out] : Header length in the data buffer.
+ * @param payload_len[out] : Payload length read from data.
+ *
+ * @return 0 in case of success, negative errno value in case of error.
+ * @see ARSDK_PROTOCOL_VERSION_2
+ */
+static int decode_header_v2(const uint8_t *buf, size_t len,
+		struct arsdk_transport_header *header, size_t *header_len,
+		uint32_t *payload_len)
+{
+	int res;
+	uint32_t proto_v = 0;
+	const uint8_t *data = buf;
+	size_t data_len = len;
+	size_t val_len = 0;
+
+	/* Type greater than ARSDK_TRANSPORT_DATA_TYPE_MAX */
+	if (len == 0 || data[0] < ARSDK_TRANSPORT_DATA_TYPE_MAX)
+		return -EPROTO;
+
+	res = read_proto_v(data, data_len, &proto_v, &val_len);
+	if (res < 0)
+		return -EPROTO;
+	data += val_len;
+	data_len -= val_len;
+
+	/* Subtract protocol version offset */
+	if (proto_v < ARSDK_PROTOCOL_VERSION_2)
+		return -EPROTO;
+
+	/* Check if there is enough data to contain the minimum data to read. */
+	if (data_len < 5)
+		return -EPROTO;
+
+	header->type = data[0];
+	data++;
+	data_len--;
+
+	header->id = data[0];
+	data++;
+	data_len--;
+
+	/* Sequence number in 16 bits */
+	header->seq = data[0] |
+		     (data[1] << 8);
+	data += 2;
+	data_len -= 2;
+
+	res = read_varuint(data, data_len, payload_len, &val_len);
+	if (res < 0)
+		return -EPROTO;
+	data += val_len;
+	data_len -= val_len;
+
+	*header_len = len - data_len;
+	return 0;
+}
+
+/**
  */
 static void process_rxbuf(struct arsdk_transport_net *self,
 		const uint8_t *rxbuf, uint32_t rxlen)
 {
-	uint32_t rxoff = 0, size = 0, payloadlen = 0;
+	int res = 0;
+	uint32_t rxoff = 0, payloadlen = 0;
 	struct arsdk_transport_header header;
 	struct arsdk_transport_payload payload;
 	const uint8_t *headerbuf, *payloadbuff;
-
+	size_t header_size = self->cfg.proto_v > ARSDK_PROTOCOL_VERSION_1 ?
+					ARSDK_FRAME_V2_HEADER_SIZE_MIN :
+					ARSDK_FRAME_V1_HEADER_SIZE;
 	while (rxoff < rxlen) {
-		if (rxoff + ARSDK_FRAME_HEADER_SIZE > rxlen) {
+		if (rxoff + header_size > rxlen) {
 			ARSDK_LOGE("transport_net %p: partial header (%u)",
 					self, (uint32_t)(rxlen - rxoff));
 			return;
@@ -433,24 +665,26 @@ static void process_rxbuf(struct arsdk_transport_net *self,
 		/* Decode header */
 		memset(&header, 0, sizeof(header));
 		headerbuf = &rxbuf[rxoff];
-		header.type = headerbuf[0];
-		header.id = headerbuf[1];
-		header.seq = headerbuf[2];
-		size = headerbuf[3] |
-				(headerbuf[4] << 8) |
-				(headerbuf[5] << 16) |
-				(headerbuf[6] << 24);
+		if (self->cfg.proto_v == ARSDK_PROTOCOL_VERSION_1) {
+			res = decode_header_v1(headerbuf, &header,
+					&payloadlen);
+			if (res < 0)
+				goto error;
+			rxoff += ARSDK_FRAME_V1_HEADER_SIZE;
+		} else {
+			res = decode_header_v2(headerbuf, rxlen - rxoff,
+					&header, &header_size, &payloadlen);
+			if (res < 0)
+				goto error;
+			rxoff += header_size;
+		}
 
 		/* Check header validity */
-		if (size < ARSDK_FRAME_HEADER_SIZE || rxoff + size > rxlen) {
-			ARSDK_LOGE("transport_net %p: bad frame", self);
-			return;
-		}
-		rxoff += ARSDK_FRAME_HEADER_SIZE;
+		if (rxoff + payloadlen > rxlen)
+			goto error;
 
 		/* Setup payload */
 		payloadbuff = &rxbuf[rxoff];
-		payloadlen = size - ARSDK_FRAME_HEADER_SIZE;
 		arsdk_transport_payload_init_with_data(&payload,
 				(payloadlen == 0 ? NULL : payloadbuff),
 				payloadlen);
@@ -458,13 +692,18 @@ static void process_rxbuf(struct arsdk_transport_net *self,
 
 		/* Log received data */
 		arsdk_transport_log_cmd(self->parent,
-				headerbuf, ARSDK_FRAME_HEADER_SIZE,
+				headerbuf, header_size,
 				&payload, ARSDK_CMD_DIR_RX);
 
 		/* Process data */
 		arsdk_transport_recv_data(self->parent, &header, &payload);
 		arsdk_transport_payload_clear(&payload);
 	}
+
+	return;
+error:
+	ARSDK_LOGE("transport_net %p: bad frame", self);
+	return;
 }
 
 /**
@@ -536,6 +775,66 @@ static int arsdk_transport_net_stop(struct arsdk_transport *base)
 	return 0;
 }
 
+static void encode_header_v1(const struct arsdk_transport_header *header,
+		uint32_t frame_size, uint8_t *headerbuf)
+{
+	headerbuf[0] = header->type;
+	headerbuf[1] = header->id;
+	/* Sequence number in 8 bits */
+	headerbuf[2] = header->seq;
+	/* Frame size number in 32 bits */
+	headerbuf[3] = frame_size & 0xff;
+	headerbuf[4] = (frame_size >> 8) & 0xff;
+	headerbuf[5] = (frame_size >> 16) & 0xff;
+	headerbuf[6] = (frame_size >> 24) & 0xff;
+}
+
+static int encode_header_v2(const struct arsdk_transport_header *header,
+		uint32_t proto_v, uint32_t payload_len, uint8_t *buf,
+		size_t buflen, size_t *headerlen)
+{
+	int res;
+	uint8_t *data = buf;
+	size_t data_len = buflen;
+	size_t val_len = 0;
+
+	if (proto_v > UINT32_MAX - ARSDK_TRANSPORT_DATA_TYPE_MAX)
+		return -EINVAL;
+	if (buflen < ARSDK_FRAME_V2_HEADER_SIZE_MAX)
+		return -ENOBUFS;
+
+	/* Protocol version */
+	res = write_proto_v(data, data_len, proto_v, &val_len);
+	if (res < 0)
+		return res;
+	data += val_len;
+	data_len -= val_len;
+
+	data[0] = header->type;
+	data++;
+	data_len--;
+
+	data[0] = header->id;
+	data++;
+	data_len--;
+
+	/* Sequence number in 16 bits */
+	data[0] = header->seq & 0xff;
+	data[1] = (header->seq >> 8) & 0xff;
+	data += 2;
+	data_len -= 2;
+
+	/* Payload size */
+	res = write_varuint(data, data_len, payload_len, &val_len);
+	if (res < 0)
+		return res;
+	data += val_len;
+	data_len -= val_len;
+
+	*headerlen = buflen - data_len;
+	return 0;
+}
+
 /**
  */
 static int arsdk_transport_net_send_data(struct arsdk_transport *base,
@@ -546,11 +845,13 @@ static int arsdk_transport_net_send_data(struct arsdk_transport *base,
 {
 	int res = 0;
 	struct arsdk_transport_net *self = arsdk_transport_get_child(base);
-	uint8_t headerbuf[ARSDK_FRAME_HEADER_SIZE];
+	uint8_t headerbuf[ARSDK_FRAME_V2_HEADER_SIZE_MAX];
 	uint32_t size = 0;
 	ssize_t writelen = 0;
 	enum arsdk_link_status link_status = ARSDK_LINK_STATUS_KO;
 	struct socket *sock = NULL;
+	size_t header_size = 0;
+
 #ifdef _WIN32
 	WSABUF wsabufs[3];
 	int wsabufcnt = 0;
@@ -573,25 +874,29 @@ static int arsdk_transport_net_send_data(struct arsdk_transport *base,
 	/* Determine socket to use */
 	sock = &self->data_sock;
 
-	/* Construct header */
-	size = ARSDK_FRAME_HEADER_SIZE + extra_hdrlen + payload->len;
-	headerbuf[0] = header->type;
-	headerbuf[1] = header->id;
-	headerbuf[2] = header->seq;
-	headerbuf[3] = size & 0xff;
-	headerbuf[4] = (size >> 8) & 0xff;
-	headerbuf[5] = (size >> 16) & 0xff;
-	headerbuf[6] = (size >> 24) & 0xff;
+	/* Encode header */
+	if (self->cfg.proto_v == ARSDK_PROTOCOL_VERSION_1) {
+		header_size = ARSDK_FRAME_V1_HEADER_SIZE;
+		size = header_size + extra_hdrlen + payload->len;
+		encode_header_v1(header, size, headerbuf);
+	} else {
+		res = encode_header_v2(header, self->cfg.proto_v,
+				extra_hdrlen + payload->len,
+				headerbuf, sizeof(headerbuf), &header_size);
+		if (res < 0)
+			return res;
+		size = header_size + extra_hdrlen + payload->len;
+	}
 
 	/* Log sent data (not for rtp/rtcp) */
 	arsdk_transport_log_cmd(self->parent,
-			headerbuf, ARSDK_FRAME_HEADER_SIZE,
+			headerbuf, header_size,
 			payload, ARSDK_CMD_DIR_TX);
 
 #ifdef _WIN32
 	/* Setup wsabufs */
 	wsabufs[wsabufcnt].buf = (char *)headerbuf;
-	wsabufs[wsabufcnt++].len = ARSDK_FRAME_HEADER_SIZE;
+	wsabufs[wsabufcnt++].len = header_size;
 	if (extra_hdrlen > 0) {
 		wsabufs[wsabufcnt].buf = (char *)extra_hdr;
 		wsabufs[wsabufcnt++].len = extra_hdrlen;
@@ -606,7 +911,7 @@ static int arsdk_transport_net_send_data(struct arsdk_transport *base,
 #else /* !_WIN32 */
 	/* Setup iov */
 	iov[iovcnt].iov_base = headerbuf;
-	iov[iovcnt++].iov_len = ARSDK_FRAME_HEADER_SIZE;
+	iov[iovcnt++].iov_len = header_size;
 	if (extra_hdrlen > 0) {
 		iov[iovcnt].iov_base = (void *)extra_hdr;
 		iov[iovcnt++].iov_len = extra_hdrlen;
@@ -654,12 +959,20 @@ static int arsdk_transport_net_send_data(struct arsdk_transport *base,
 	return res;
 }
 
+static uint32_t arsdk_transport_net_get_proto_v(struct arsdk_transport *base)
+{
+	struct arsdk_transport_net *self = arsdk_transport_get_child(base);
+	ARSDK_RETURN_VAL_IF_FAILED(self != NULL, -EINVAL, 0);
+	return self->cfg.proto_v;
+}
+
 /** */
 static const struct arsdk_transport_ops s_arsdk_transport_net_ops = {
 	.dispose = &arsdk_transport_net_dispose,
 	.start = &arsdk_transport_net_start,
 	.stop = &arsdk_transport_net_stop,
 	.send_data = &arsdk_transport_net_send_data,
+	.get_proto_v = &arsdk_transport_net_get_proto_v,
 };
 
 /**
@@ -701,8 +1014,8 @@ int arsdk_transport_net_new(struct pomp_loop *loop,
 		self->tx_drop_ratio = atoi(val);
 
 	/* Setup base structure */
-	res = arsdk_transport_new(self, &s_arsdk_transport_net_ops,
-			loop, ARSDK_TRANSPORT_PING_PERIOD, ARSDK_TRANSPORT_TAG,
+	res = arsdk_transport_new(self, &s_arsdk_transport_net_ops, loop,
+			ARSDK_TRANSPORT_PING_PERIOD, ARSDK_TRANSPORT_TAG,
 			&self->parent);
 	if (res < 0)
 		goto error;

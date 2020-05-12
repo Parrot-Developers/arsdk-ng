@@ -42,7 +42,7 @@ struct arsdk_transport {
 	struct {
 		struct pomp_timer         *timer;
 		uint32_t                  period;
-		uint8_t                   next_seq;
+		uint16_t                  next_seq;
 		int                       running;
 		uint64_t                  start;
 		uint64_t                  end;
@@ -94,6 +94,7 @@ static int send_ping(struct arsdk_transport *self)
 	header.type = ARSDK_TRANSPORT_DATA_TYPE_NOACK;
 	header.id = ARSDK_TRANSPORT_ID_PING;
 	header.seq = self->ping.next_seq++;
+
 	arsdk_transport_payload_init_with_data(&payload, cdata, len);
 
 	/* Send data */
@@ -111,7 +112,7 @@ static int send_ping(struct arsdk_transport *self)
  */
 static int send_pong(struct arsdk_transport *self,
 		enum arsdk_transport_data_type type,
-		uint8_t seq,
+		uint16_t seq,
 		const struct arsdk_transport_payload *payload)
 {
 	struct arsdk_transport_header header;
@@ -248,11 +249,11 @@ int arsdk_transport_new(
 
 	/* Initialize structure */
 	self->child = child;
+	self->name = name;
 	self->ops = ops;
 	self->loop = loop;
 	self->link_status = ARSDK_LINK_STATUS_OK;
 	self->ping.period = ping_period;
-	self->name = name;
 
 	/* Create ping timer */
 	self->ping.timer = pomp_timer_new(self->loop, &timer_cb, self);
@@ -439,4 +440,13 @@ void arsdk_transport_log_cmd(
 			payload->cdata,
 			payload->len,
 			self->cbs.userdata);
+}
+
+uint32_t arsdk_transport_get_proto_v(struct arsdk_transport *self)
+{
+	ARSDK_RETURN_VAL_IF_FAILED(self != NULL, -EINVAL, 0);
+	if (self->ops->get_proto_v != NULL)
+		return (*self->ops->get_proto_v)(self);
+	else
+		return 1;
 }

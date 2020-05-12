@@ -27,24 +27,65 @@
 #ifndef _ARSDK_CMD_ITF_PRIV_H_
 #define _ARSDK_CMD_ITF_PRIV_H_
 
-/** */
+/** Informations of transmission queue */
 struct arsdk_cmd_queue_info {
+	/** Type of data in the queue. */
 	enum arsdk_transport_data_type  type;
+	/** Queue identifier. */
 	uint8_t                         id;
+	/**
+	 * Maximum rate of send in millisecond.
+	 * '0' to send soon as possible.
+	 * Not used since the version 2. Sending always soon as possible.*/
 	int                             max_tx_rate_ms;
+	/**
+	 * Time to wait after retry to send an acknowledged command;
+	 * in millisecond.
+	 * Not used if 'type' is not 'ARSDK_TRANSPORT_DATA_TYPE_WITHACK'.
+	 */
 	int                             ack_timeout_ms;
+	/**
+	 * Different of '0' to allow to overwrite old pending commands
+	 * in the queue.
+	 * Not used since the version 2; overwriting not more allowed.
+	 */
 	int                             overwrite;
+	/**
+	 * Maximum count of retry before to drop a command.
+	 * '-1' for infinite retry.
+	 * Not used since the version 2; forced in infinite retry.
+	 */
 	int32_t                         default_max_retry_count;
 };
 
-/** */
+/** Command interface internal callbacks. */
 struct arsdk_cmd_itf_internal_cbs {
+	/** User data given in callbacks */
 	void *userdata;
 
-	int (*dispose)(struct arsdk_cmd_itf *itf,
-			void *userdata);
+	/**
+	 * Function called when the command interface is disposed.
+	 *
+	 * @param itf : interface object.
+	 * @param userdata : user data.
+	 */
+	int (*dispose)(struct arsdk_cmd_itf *itf, void *userdata);
 };
 
+/**
+ * Creates a new command interface
+ *
+ * @param transport : Transport used to send commands.
+ * @param cbs : Interface callbacks.
+ * @param internal_cbs : Interface internal callbacks.
+ * @param tx_info_table : transmission queues information.
+ * @param tx_count : length of 'tx_info_table'.
+ * @param ackoff : Index offset between a transmission queue and
+ *		   its reception acknowledge.
+ * @param[out] ret_itf : will receive the command interface object.
+ *
+ * @return 0 in case of success, negative errno value in case of error.
+ */
 ARSDK_API int arsdk_cmd_itf_new(struct arsdk_transport *transport,
 		const struct arsdk_cmd_itf_cbs *cbs,
 		const struct arsdk_cmd_itf_internal_cbs *internal_cbs,
@@ -53,13 +94,37 @@ ARSDK_API int arsdk_cmd_itf_new(struct arsdk_transport *transport,
 		uint8_t ackoff,
 		struct arsdk_cmd_itf **ret_itf);
 
+/**
+ * Destroys an command interface
+ *
+ * @param itf : Command interface to destroy.
+ *
+ * @return 0 in case of success, negative errno value in case of error.
+ */
 ARSDK_API int arsdk_cmd_itf_destroy(struct arsdk_cmd_itf *itf);
 
+/**
+ * Stops the interface.
+ *
+ * Cancel all pending commands.
+ *
+ * @param itf : Command interface to stop.
+ *
+ * @return 0 in case of success, negative errno value in case of error.
+ */
 ARSDK_API int arsdk_cmd_itf_stop(struct arsdk_cmd_itf *itf);
 
+/**
+ * Notifies data received to the interface.
+ *
+ * @param itf : The command interface.
+ * @param header : data header.
+ * @param payload : data payload.
+ *
+ * @return 0 in case of success, negative errno value in case of error.
+ */
 ARSDK_API int arsdk_cmd_itf_recv_data(struct arsdk_cmd_itf *itf,
 		const struct arsdk_transport_header *header,
 		const struct arsdk_transport_payload *payload);
-
 
 #endif /* !_ARSDK_CMD_ITF_PRIV_H_ */

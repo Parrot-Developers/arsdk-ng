@@ -44,6 +44,7 @@ enum arsdk_device_state {
  */
 struct arsdk_device_info {
 	enum arsdk_backend_type  backend_type;  /**< Underlying backend type */
+	uint32_t                 proto_v;       /**< Protocol version */
 	enum arsdk_device_state  state;         /**< State */
 	const char               *name;         /**< Name */
 	enum arsdk_device_type   type;          /**< Type */

@@ -35,6 +35,7 @@ struct arsdk_discovery_device_info {
 	const char              *addr;
 	uint16_t                port;
 	const char              *id;
+	uint32_t                proto_v; /**< protocol version */
 };
 
 struct arsdk_discovery;
