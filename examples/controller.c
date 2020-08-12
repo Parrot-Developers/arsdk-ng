@@ -1250,6 +1250,7 @@ static void send_start_video(struct app *app)
 	case ARSDK_DEVICE_TYPE_SKYCTRL_2 :
 	case ARSDK_DEVICE_TYPE_SKYCTRL_2P :
 	case ARSDK_DEVICE_TYPE_SKYCTRL_3 :
+	case ARSDK_DEVICE_TYPE_SKYCTRL_UA :
 	case ARSDK_DEVICE_TYPE_EVINRUDE :
 		res = arsdk_cmd_send_Ardrone3_MediaStreaming_VideoEnable(
 				app->cmd_itf, &send_status, app, 1);
@@ -1333,6 +1334,7 @@ static void timer_cb(struct pomp_timer *timer, void *userdata)
 	case ARSDK_DEVICE_TYPE_SKYCTRL_2 :
 	case ARSDK_DEVICE_TYPE_SKYCTRL_2P :
 	case ARSDK_DEVICE_TYPE_SKYCTRL_3 :
+	case ARSDK_DEVICE_TYPE_SKYCTRL_UA :
 	case ARSDK_DEVICE_TYPE_EVINRUDE :
 		res = arsdk_cmd_enc_Ardrone3_Piloting_PCMD(&cmd,
 				0 /*_flag*/,
@@ -1396,7 +1398,8 @@ static int isRadioControl(const struct arsdk_device_info *dev_info)
 	    (dev_info->type == ARSDK_DEVICE_TYPE_SKYCTRL_2) ||
 	    (dev_info->type == ARSDK_DEVICE_TYPE_SKYCTRL_2P) ||
 	    (dev_info->type == ARSDK_DEVICE_TYPE_SKYCTRL_NG) ||
-	    (dev_info->type == ARSDK_DEVICE_TYPE_SKYCTRL_3))
+	    (dev_info->type == ARSDK_DEVICE_TYPE_SKYCTRL_3) ||
+	    (dev_info->type == ARSDK_DEVICE_TYPE_SKYCTRL_UA))
 		return 1;
 	else
 		return 0;
@@ -1444,6 +1447,7 @@ static uint32_t get_pcmd_period(const struct arsdk_device_info *info)
 	case ARSDK_DEVICE_TYPE_SKYCTRL_2 :
 	case ARSDK_DEVICE_TYPE_SKYCTRL_2P :
 	case ARSDK_DEVICE_TYPE_SKYCTRL_3 :
+	case ARSDK_DEVICE_TYPE_SKYCTRL_UA :
 	case ARSDK_DEVICE_TYPE_EVINRUDE :
 		return PCMD_PERIOD_DRONE;
 	case ARSDK_DEVICE_TYPE_JS :
@@ -1673,6 +1677,7 @@ static void backend_create(struct app *app)
 		ARSDK_DEVICE_TYPE_SKYCTRL_2P,
 		ARSDK_DEVICE_TYPE_SKYCTRL_NG,
 		ARSDK_DEVICE_TYPE_SKYCTRL_3,
+		ARSDK_DEVICE_TYPE_SKYCTRL_UA,
 	};
 
 	memset(&discovery_cfg, 0, sizeof(discovery_cfg));

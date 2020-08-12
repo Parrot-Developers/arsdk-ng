@@ -328,7 +328,8 @@ static int resolution(struct arsdk_ftp_itf *itf,
 		if (dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_2 ||
 		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_2P ||
 		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_NG ||
-		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_3)
+		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_3  ||
+		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_UA)
 			*host = "skycontroller";
 		else
 			*host = "drone";
