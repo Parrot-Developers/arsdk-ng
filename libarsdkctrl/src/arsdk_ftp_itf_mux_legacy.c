@@ -63,14 +63,13 @@ struct arsdk_ftp_req_base {
 	enum arsdk_device_type             dev_type;
 	char                               *server;
 	uint16_t                           port;
-	struct mux_ip_proxy                *mux_ftp_proxy;
+	struct mux_tcp_proxy               *mux_tcp_proxy;
 };
 
 /** */
 struct arsdk_ftp_req_put {
 	struct arsdk_ftp_req_base       *base;
 	struct arsdk_ftp_req_put_cbs    cbs;
-	uint8_t                         is_resume;
 	FILE                            *fin;
 	char                            *remote_path;
 	char                            *local_path;
@@ -125,7 +124,6 @@ struct arsdk_ftp_req_list {
 };
 
 struct arsdk_ftp_req_ops {
-	int (*start)(struct arsdk_ftp_req_base *req);
 	void (*complete)(struct arsdk_ftp_req_base *req,
 			enum arsdk_ftp_req_status status,
 			int error);
@@ -181,10 +179,10 @@ static void req_destroy(struct arsdk_ftp_req_base *req)
 	if (req->ftpreq != NULL)
 		ARSDK_LOGW("request %p still pending", req);
 
-	if (req->mux_ftp_proxy != 0) {
-		res = mux_ip_proxy_destroy(req->mux_ftp_proxy);
+	if (req->mux_tcp_proxy != 0) {
+		res = mux_tcp_proxy_destroy(req->mux_tcp_proxy);
 		if (res < 0)
-			ARSDK_LOG_ERRNO("mux_ip_proxy_destroy", -res);
+			ARSDK_LOG_ERRNO("mux_tcp_proxy_destroy", -res);
 	}
 
 	free(req->server);
@@ -330,9 +328,7 @@ static int resolution(struct arsdk_ftp_itf *itf,
 		if (dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_2 ||
 		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_2P ||
 		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_NG ||
-		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_3  ||
-		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_UA ||
-		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_4)
+		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_3)
 			*host = "skycontroller";
 		else
 			*host = "drone";
@@ -342,54 +338,6 @@ static int resolution(struct arsdk_ftp_itf *itf,
 	case ARSDK_BACKEND_TYPE_UNKNOWN:
 	default:
 		return -EINVAL;
-	}
-}
-
-/**
- */
-static void mux_proxy_open_cb(struct mux_ip_proxy *self, uint16_t localport,
-			void *userdata)
-{
-	int res;
-	struct arsdk_ftp_req_base *req = userdata;
-
-	ARSDK_RETURN_IF_FAILED(req != NULL, -EINVAL);
-
-	req->port = localport;
-
-	res = (*req->ops->start)(req);
-	if (res < 0) {
-		/* Notify and cleanup request */
-		(*req->ops->complete)(req, ARSDK_FTP_REQ_STATUS_FAILED, res);
-		req->ftpreq = NULL;
-		(*req->ops->destroy)(req);
-	}
-}
-
-/**
- */
-static void mux_proxy_close_cb(struct mux_ip_proxy *self, void *userdata)
-{
-	struct arsdk_ftp_req_base *req = userdata;
-
-	ARSDK_RETURN_IF_FAILED(req != NULL, -EINVAL);
-
-	req->port = 0;
-}
-
-/**
- */
-static void idle_req_start_cb(void *userdata)
-{
-	int res;
-	struct arsdk_ftp_req_base *req = userdata;
-
-	res = (*req->ops->start)(req);
-	if (res < 0) {
-		/* Notify and cleanup request */
-		(*req->ops->complete)(req, ARSDK_FTP_REQ_STATUS_FAILED, res);
-		req->ftpreq = NULL;
-		(*req->ops->destroy)(req);
 	}
 }
 
@@ -406,19 +354,8 @@ static int req_new(struct arsdk_ftp_itf *itf,
 	struct arsdk_ftp_req_base *req = NULL;
 	int port = -1;
 	const char *host = NULL;
-	struct mux_ip_proxy_info mux_info = {
-		.protocol = {
-			.transport = MUX_IP_PROXY_TRANSPORT_TCP,
-			.application = MUX_IP_PROXY_APPLICATION_FTP,
-		},
-	};
-	struct mux_ip_proxy_cbs mux_cbs = {
-		.open = &mux_proxy_open_cb,
-		.close = &mux_proxy_close_cb,
-	};
 
 	ARSDK_RETURN_ERR_IF_FAILED(ops != NULL, -EINVAL);
-	ARSDK_RETURN_ERR_IF_FAILED(ops->start != NULL, -EINVAL);
 	ARSDK_RETURN_ERR_IF_FAILED(ops->complete != NULL, -EINVAL);
 	ARSDK_RETURN_ERR_IF_FAILED(ops->progress != NULL, -EINVAL);
 	ARSDK_RETURN_ERR_IF_FAILED(ops->read != NULL, -EINVAL);
@@ -453,25 +390,16 @@ static int req_new(struct arsdk_ftp_itf *itf,
 	if (req->itf->mux == NULL) {
 		req->port = port;
 		req->server = strdup(host);
-
-		pomp_loop_idle_add(
-				arsdk_transport_get_loop(req->itf->transport),
-				&idle_req_start_cb, req);
-
 	} else {
-		mux_info.remote_host = host;
-		mux_info.remote_port = port;
-
-		mux_cbs.userdata = req;
-
 		/* Allocate mux tcp proxy */
-		res = mux_ip_proxy_new(itf->mux, &mux_info, &mux_cbs, -1,
-				&req->mux_ftp_proxy);
+		res = mux_tcp_proxy_new(itf->mux, host, port, 1,
+				&req->mux_tcp_proxy);
 		if (res < 0) {
-			ARSDK_LOG_ERRNO("mux_ip_proxy_new", -res);
+			ARSDK_LOG_ERRNO("mux_tcp_proxy_new", -res);
 			goto error;
 		}
 		req->server = strdup("127.0.0.1");
+		req->port = mux_tcp_proxy_get_port(req->mux_tcp_proxy);
 	}
 
 	*ret_req = req;
@@ -587,7 +515,6 @@ int arsdk_ftp_itf_cancel_all(struct arsdk_ftp_itf *itf)
 
 /* Get request : */
 
-
 /**
  */
 static void arsdk_ftp_req_get_destroy(struct arsdk_ftp_req_get *req_get)
@@ -605,28 +532,6 @@ static void arsdk_ftp_req_get_destroy(struct arsdk_ftp_req_get *req_get)
 	free(req_get->local_path);
 	free(req_get->remote_path);
 	free(req_get);
-}
-
-static int req_get_start(struct arsdk_ftp_req_base *req)
-{
-	int res;
-	struct arsdk_ftp_req_get *req_get = req->child;
-	char *url = get_url(req_get->base, req_get->remote_path);
-	if (url == NULL) {
-		res = -ENOMEM;
-		goto error;
-	}
-
-	res = arsdk_ftp_get(req_get->base->itf->ftp_ctx, &req_get->base->ftpcbs,
-			url, req_get->dlsize, &req_get->base->ftpreq);
-	if (res < 0)
-		goto error;
-
-	free(url);
-	return 0;
-error:
-	free(url);
-	return res;
 }
 
 static void req_get_destroy(struct arsdk_ftp_req_base *req)
@@ -701,7 +606,6 @@ static void req_get_complete(struct arsdk_ftp_req_base *req,
 /**
  */
 static const struct arsdk_ftp_req_ops s_req_get_ops = {
-	.start = &req_get_start,
 	.read = &default_read_data,
 	.write = &req_get_write_data,
 	.progress = &req_get_progress,
@@ -753,6 +657,7 @@ int arsdk_ftp_itf_create_req_get(struct arsdk_ftp_itf *itf,
 {
 	int res = 0;
 	struct arsdk_ftp_req_get *req_get = NULL;
+	char *url = NULL;
 
 	ARSDK_RETURN_ERR_IF_FAILED(ret_req != NULL, -EINVAL);
 	*ret_req = NULL;
@@ -816,12 +721,24 @@ int arsdk_ftp_itf_create_req_get(struct arsdk_ftp_itf *itf,
 	req_get->dlpercent = -1;
 	req_get->remote_path = xstrdup(remote_path);
 	req_get->cbs = *cbs;
+	url = get_url(req_get->base, remote_path);
+	if (url == NULL) {
+		res = -ENOMEM;
+		goto error;
+	}
 
+	res = arsdk_ftp_get(itf->ftp_ctx, &req_get->base->ftpcbs, url,
+			req_get->dlsize, &req_get->base->ftpreq);
+	if (res < 0)
+		goto error;
+
+	free(url);
 	*ret_req = req_get;
 	return 0;
 
 error:
 	arsdk_ftp_req_get_destroy(req_get);
+	free(url);
 	return res;
 }
 
@@ -979,6 +896,16 @@ static void req_put_complete(struct arsdk_ftp_req_base *req,
 			req_put->cbs.userdata);
 }
 
+/**
+ */
+static const struct arsdk_ftp_req_ops s_req_put_ops = {
+	.read = &req_put_read_data,
+	.write = &default_write_data,
+	.progress = &req_put_progress,
+	.complete = &req_put_complete,
+	.destroy = &req_put_destroy,
+};
+
 static size_t size_read_data(struct arsdk_ftp *itf,
 			struct arsdk_ftp_req *req,
 			void *ptr,
@@ -1059,55 +986,6 @@ complete:
 			req_put->base);
 }
 
-static int req_put_start(struct arsdk_ftp_req_base *req)
-{
-	int res = 0;
-	struct arsdk_ftp_req_cbs req_size_cb;
-	struct arsdk_ftp_req_put *req_put = req->child;
-	char *url = get_url(req_put->base, req_put->remote_path);
-	if (url == NULL) {
-		res = -ENOMEM;
-		goto error;
-	}
-
-	if (req_put->is_resume) {
-		/* Send a size request before resume the request put */
-		memset(&req_size_cb, 0, sizeof(req_size_cb));
-		req_size_cb.read_data = &size_read_data;
-		req_size_cb.write_data = &size_write_data;
-		req_size_cb.progress = &size_progress;
-		req_size_cb.complete = &size_complete;
-		req_size_cb.userdata = req_put;
-		res = arsdk_ftp_size(req->itf->ftp_ctx, &req_size_cb, url,
-				&req_put->ftp_size_req);
-		if (res < 0)
-			goto error;
-	} else {
-		res = arsdk_ftp_put(req->itf->ftp_ctx, &req_put->base->ftpcbs,
-				url, 0, req_put->total_size,
-				&req_put->base->ftpreq);
-		if (res < 0)
-			goto error;
-	}
-
-	free(url);
-	return 0;
-error:
-	free(url);
-	return res;
-}
-
-/**
- */
-static const struct arsdk_ftp_req_ops s_req_put_ops = {
-	.start = &req_put_start,
-	.read = &req_put_read_data,
-	.write = &default_write_data,
-	.progress = &req_put_progress,
-	.complete = &req_put_complete,
-	.destroy = &req_put_destroy,
-};
-
 /**
  */
 static int create_req_put(struct arsdk_ftp_itf *itf,
@@ -1122,7 +1000,9 @@ static int create_req_put(struct arsdk_ftp_itf *itf,
 {
 	int res = 0;
 	struct arsdk_ftp_req_put *req_put = NULL;
+	char *url = NULL;
 	struct stat stbuf;
+	struct arsdk_ftp_req_cbs req_size_cb;
 
 	ARSDK_RETURN_ERR_IF_FAILED(ret_req != NULL, -EINVAL);
 	*ret_req = NULL;
@@ -1178,16 +1058,41 @@ static int create_req_put(struct arsdk_ftp_itf *itf,
 		req_put->buff = buffer;
 	}
 
-	req_put->is_resume = is_resume;
 	req_put->ulpercent = -1;
 	req_put->remote_path = xstrdup(remote_path);
 	req_put->cbs = *cbs;
+	url = get_url(req_put->base, remote_path);
+	if (url == NULL) {
+		res = -ENOMEM;
+		goto error;
+	}
 
+	if (is_resume) {
+		/* Send a size request before resume the request put */
+		memset(&req_size_cb, 0, sizeof(req_size_cb));
+		req_size_cb.read_data = &size_read_data;
+		req_size_cb.write_data = &size_write_data;
+		req_size_cb.progress = &size_progress;
+		req_size_cb.complete = &size_complete;
+		req_size_cb.userdata = req_put;
+		res = arsdk_ftp_size(itf->ftp_ctx, &req_size_cb, url,
+				&req_put->ftp_size_req);
+		if (res < 0)
+			goto error;
+	} else {
+		res = arsdk_ftp_put(itf->ftp_ctx, &req_put->base->ftpcbs, url,
+				0, req_put->total_size, &req_put->base->ftpreq);
+		if (res < 0)
+			goto error;
+	}
+
+	free(url);
 	*ret_req = req_put;
 	return 0;
 
 error:
 	arsdk_ftp_req_put_destroy(req_put);
+	free(url);
 	return res;
 }
 
@@ -1293,32 +1198,9 @@ static void req_delete_complete(struct arsdk_ftp_req_base *req,
 			req_del->cbs.userdata);
 }
 
-static int req_delete_start(struct arsdk_ftp_req_base *req)
-{
-	int res = 0;
-	struct arsdk_ftp_req_delete *req_del = req->child;
-	char *url = get_url(req_del->base, req_del->path);
-	if (url == NULL) {
-		res = -ENOMEM;
-		goto error;
-	}
-
-	res = arsdk_ftp_delete(req_del->base->itf->ftp_ctx,
-			&req_del->base->ftpcbs, url, &req_del->base->ftpreq);
-	if (res < 0)
-		goto error;
-
-	free(url);
-	return 0;
-error:
-	free(url);
-	return res;
-}
-
 /**
  */
 static const struct arsdk_ftp_req_ops s_req_delete_ops = {
-	.start = &req_delete_start,
 	.read = &default_read_data,
 	.write = &default_write_data,
 	.progress = &default_progress,
@@ -1336,6 +1218,7 @@ int arsdk_ftp_itf_create_req_delete(
 {
 	int res = 0;
 	struct arsdk_ftp_req_delete *req_del = NULL;
+	char *url = NULL;
 
 	ARSDK_RETURN_ERR_IF_FAILED(ret_req != NULL, -EINVAL);
 	*ret_req = NULL;
@@ -1356,12 +1239,24 @@ int arsdk_ftp_itf_create_req_delete(
 
 	req_del->path = xstrdup(remote_path);
 	req_del->cbs = *cbs;
+	url = get_url(req_del->base, remote_path);
+	if (url == NULL) {
+		res = -ENOMEM;
+		goto error;
+	}
 
+	res = arsdk_ftp_delete(itf->ftp_ctx, &req_del->base->ftpcbs,
+			url, &req_del->base->ftpreq);
+	if (res < 0)
+		goto error;
+
+	free(url);
 	*ret_req = req_del;
 	return 0;
 
 error:
 	arsdk_ftp_req_delete_destroy(req_del);
+	free(url);
 	return res;
 }
 
@@ -1422,33 +1317,9 @@ static void req_rename_complete(struct arsdk_ftp_req_base *req,
 			req_rename->cbs.userdata);
 }
 
-static int req_rename_start(struct arsdk_ftp_req_base *req)
-{
-	int res = 0;
-	struct arsdk_ftp_req_rename *req_rename = req->child;
-
-	char *url = get_url(req_rename->base, req_rename->src);
-	if (url == NULL) {
-		res = -ENOMEM;
-		goto error;
-	}
-
-	res = arsdk_ftp_rename(req->itf->ftp_ctx, &req_rename->base->ftpcbs,
-			url, req_rename->dst, &req_rename->base->ftpreq);
-	if (res < 0)
-		goto error;
-
-	free(url);
-	return 0;
-error:
-	free(url);
-	return res;
-}
-
 /**
  */
 static const struct arsdk_ftp_req_ops s_req_rename_ops = {
-	.start = &req_rename_start,
 	.read = &default_read_data,
 	.write = &default_write_data,
 	.progress = &default_progress,
@@ -1467,6 +1338,7 @@ int arsdk_ftp_itf_create_req_rename(
 {
 	int res = 0;
 	struct arsdk_ftp_req_rename *req_rename = NULL;
+	char *url = NULL;
 
 	ARSDK_RETURN_ERR_IF_FAILED(ret_req != NULL, -EINVAL);
 	*ret_req = NULL;
@@ -1489,12 +1361,24 @@ int arsdk_ftp_itf_create_req_rename(
 	req_rename->src = xstrdup(src);
 	req_rename->dst = xstrdup(dst);
 	req_rename->cbs = *cbs;
+	url = get_url(req_rename->base, src);
+	if (url == NULL) {
+		res = -ENOMEM;
+		goto error;
+	}
 
+	res = arsdk_ftp_rename(itf->ftp_ctx, &req_rename->base->ftpcbs,
+			url, dst, &req_rename->base->ftpreq);
+	if (res < 0)
+		goto error;
+
+	free(url);
 	*ret_req = req_rename;
 	return 0;
 
 error:
 	arsdk_ftp_req_rename_destroy(req_rename);
+	free(url);
 	return res;
 }
 
@@ -1768,32 +1652,9 @@ end:
 	return;
 }
 
-static int req_list_start(struct arsdk_ftp_req_base *req)
-{
-	int res = 0;
-	struct arsdk_ftp_req_list *req_list = req->child;
-	char *url = get_url(req_list->base, req_list->path);
-	if (url == NULL) {
-		res = -ENOMEM;
-		goto error;
-	}
-
-	res = arsdk_ftp_list(req->itf->ftp_ctx, &req_list->base->ftpcbs,
-			url, &req_list->base->ftpreq);
-	if (res < 0)
-		goto error;
-
-	free(url);
-	return 0;
-error:
-	free(url);
-	return res;
-}
-
 /**
  */
 static const struct arsdk_ftp_req_ops s_req_list_ops = {
-	.start = &req_list_start,
 	.read = &default_read_data,
 	.write = &req_list_write_data,
 	.progress = &default_progress,
@@ -1811,6 +1672,7 @@ int arsdk_ftp_itf_create_req_list(
 {
 	int res = 0;
 	struct arsdk_ftp_req_list *req_list = NULL;
+	char *url = NULL;
 
 	ARSDK_RETURN_ERR_IF_FAILED(ret_req != NULL, -EINVAL);
 	*ret_req = NULL;
@@ -1837,11 +1699,24 @@ int arsdk_ftp_itf_create_req_list(
 		goto error;
 	}
 
+	url = get_url(req_list->base, remote_path);
+	if (url == NULL) {
+		res = -ENOMEM;
+		goto error;
+	}
+
+	res = arsdk_ftp_list(itf->ftp_ctx, &req_list->base->ftpcbs,
+			url, &req_list->base->ftpreq);
+	if (res < 0)
+		goto error;
+
+	free(url);
 	*ret_req = req_list;
 	return 0;
 
 error:
 	arsdk_ftp_req_list_destroy(req_list);
+	free(url);
 	return res;
 }
 

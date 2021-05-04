@@ -504,6 +504,7 @@ static void device_conn_raw_cb(
 
 	newinfo = *info;
 	newinfo.proto_v = self->proto_v;
+	newinfo.api = ARSDK_DEVICE_API_FULL;
 	newinfo.json = self->rxjson;
 
 	/* Notify connection */
@@ -739,11 +740,18 @@ int arsdkctrl_backend_net_new(struct arsdk_ctrl *ctrl,
 	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_min == 0 ||
 			cfg->proto_v_min >= ARSDKCTRL_BACKEND_NET_PROTO_MIN,
 			-EINVAL);
+	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_max == 0 ||
+			cfg->proto_v_max >= ARSDKCTRL_BACKEND_NET_PROTO_MIN,
+			-EINVAL);
 #endif
 	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_max == 0 ||
 			cfg->proto_v_max <= ARSDKCTRL_BACKEND_NET_PROTO_MAX,
 			-EINVAL);
-	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_min <= cfg->proto_v_max,
+	ARSDK_RETURN_ERR_IF_FAILED(
+			(cfg->proto_v_max != 0 &&
+			 cfg->proto_v_min <= cfg->proto_v_max) ||
+			(cfg->proto_v_max == 0 &&
+			 cfg->proto_v_min <= ARSDKCTRL_BACKEND_NET_PROTO_MAX),
 			-EINVAL);
 
 	/* Allocate structure */

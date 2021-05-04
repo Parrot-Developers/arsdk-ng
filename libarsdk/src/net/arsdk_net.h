@@ -178,4 +178,6 @@ static inline struct json_object *get_json_object(struct json_object *obj,
 #define ARSDK_NET_DISCOVERY_KEY_PORT "port"
 #define ARSDK_NET_DISCOVERY_KEY_NAME "name"
 
+int get_ip_addr(struct in_addr *addr, const char *interface_name);
+
 #endif /* _ARSDK_NET_H_ */

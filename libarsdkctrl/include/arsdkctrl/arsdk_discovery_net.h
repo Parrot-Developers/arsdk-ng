@@ -35,6 +35,13 @@ ARSDK_API int arsdk_discovery_net_new(struct arsdk_ctrl *ctrl,
 		const char *addr,
 		struct arsdk_discovery_net **ret_obj);
 
+ARSDK_API int arsdk_discovery_net_new_with_port(struct arsdk_ctrl *ctrl,
+		struct arsdkctrl_backend_net *backend,
+		const struct arsdk_discovery_cfg *cfg,
+		const char *addr,
+		uint16_t port,
+		struct arsdk_discovery_net **ret_obj);
+
 ARSDK_API int arsdk_discovery_net_destroy(struct arsdk_discovery_net *self);
 
 ARSDK_API int arsdk_discovery_net_start(struct arsdk_discovery_net *self);

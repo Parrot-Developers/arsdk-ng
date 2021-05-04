@@ -34,6 +34,7 @@ struct arsdk_discovery_net {
 	struct arsdkctrl_backend_net    *backend;
 	struct pomp_ctx                 *ctx;
 	char                            *addr;
+	uint16_t                         port;
 	enum arsdk_device_type          *types;
 	size_t                          n_types;
 	struct arsdk_discovery_device_info dev_info;
@@ -169,12 +170,23 @@ static void socket_cb(struct pomp_ctx *ctx,
 	arsdkctrl_backend_socket_cb(base, fd, ARSDK_SOCKET_KIND_DISCOVERY);
 }
 
-/**
- */
 int arsdk_discovery_net_new(struct arsdk_ctrl *ctrl,
 		struct arsdkctrl_backend_net *backend,
 		const struct arsdk_discovery_cfg *cfg,
 		const char *addr,
+		struct arsdk_discovery_net **ret_obj)
+{
+	return arsdk_discovery_net_new_with_port(ctrl, backend, cfg, addr,
+			ARSDK_NET_DISCOVERY_PORT, ret_obj);
+}
+
+/**
+ */
+int arsdk_discovery_net_new_with_port(struct arsdk_ctrl *ctrl,
+		struct arsdkctrl_backend_net *backend,
+		const struct arsdk_discovery_cfg *cfg,
+		const char *addr,
+		uint16_t port,
 		struct arsdk_discovery_net **ret_obj)
 {
 	struct arsdk_discovery_net *self = NULL;
@@ -199,6 +211,7 @@ int arsdk_discovery_net_new(struct arsdk_ctrl *ctrl,
 	self->ctx = pomp_ctx_new_with_loop(&event_cb, self,
 			arsdk_ctrl_get_loop(ctrl));
 	self->addr = xstrdup(addr);
+	self->port = port;
 	self->dev_info.addr = self->addr;
 
 	/* Set socket callback*/
@@ -286,7 +299,7 @@ int arsdk_discovery_net_start(struct arsdk_discovery_net *self)
 		return res;
 	}
 
-	addr.sin_port = htons(ARSDK_NET_DISCOVERY_PORT);
+	addr.sin_port = htons(self->port);
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = inet_addr(self->addr);
 

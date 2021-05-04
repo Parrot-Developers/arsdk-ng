@@ -48,6 +48,7 @@
 #include <libpomp.h>
 #include <futils/futils.h>
 #include <futils/timetools.h>
+#include <futils/varint.h>
 
 /* Public headers */
 #include "arsdk/arsdk.h"
@@ -129,6 +130,7 @@ typedef _W64 signed int ssize_t;
 /* forward declarations */
 struct arsdk_cmd_itf1;
 struct arsdk_cmd_itf2;
+struct arsdk_cmd_itf3;
 
 /** */
 struct arsdk_cmd_itf {
@@ -140,6 +142,7 @@ struct arsdk_cmd_itf {
 	union {
 		struct arsdk_cmd_itf1      *v1;
 		struct arsdk_cmd_itf2      *v2;
+		struct arsdk_cmd_itf3      *v3;
 	} core;
 };
 

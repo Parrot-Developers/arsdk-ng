@@ -176,6 +176,7 @@ int arsdk_discovery_add_device(struct arsdk_discovery *self,
 	devinfo.addr = info->addr;
 	devinfo.id = info->id;
 	devinfo.port = info->port;
+	devinfo.api = info->api;
 
 	/* create device */
 	ARSDK_LOGI("discovery '%s': add device name='%s' id='%s'",

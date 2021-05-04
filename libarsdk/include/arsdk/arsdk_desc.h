@@ -59,6 +59,7 @@ enum arsdk_arg_type {
 	ARSDK_ARG_TYPE_DOUBLE,
 	ARSDK_ARG_TYPE_STRING,
 	ARSDK_ARG_TYPE_ENUM,
+	ARSDK_ARG_TYPE_BINARY,
 };
 
 struct arsdk_enum_desc {

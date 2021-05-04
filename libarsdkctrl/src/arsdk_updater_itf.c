@@ -148,7 +148,8 @@ static struct arsdk_updater_transport *get_tsprt(struct arsdk_updater_itf *itf,
 		if (dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_2 ||
 		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_NG ||
 		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_3 ||
-		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_UA)
+		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_UA ||
+		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_4)
 			return arsdk_updater_transport_mux_get_parent(
 					itf->mux_tsprt);
 		else
@@ -202,6 +203,7 @@ enum arsdk_device_type arsdk_updater_appid_to_devtype(const uint32_t app_id)
 		{0x8d, ARSDK_DEVICE_TYPE_ANAFI_THERMAL},
 		{0x89, ARSDK_DEVICE_TYPE_CHIMERA},
 		{0x77, ARSDK_DEVICE_TYPE_PAROS},
+		{0x8e, ARSDK_DEVICE_TYPE_ANAFI_2},
 		{0x8f, ARSDK_DEVICE_TYPE_ANAFI_UA},
 		{0x92, ARSDK_DEVICE_TYPE_ANAFI_USA},
 		{0x67, ARSDK_DEVICE_TYPE_SKYCTRL},
@@ -209,6 +211,7 @@ enum arsdk_device_type arsdk_updater_appid_to_devtype(const uint32_t app_id)
 		{0x87, ARSDK_DEVICE_TYPE_SKYCTRL_2P},
 		{0x8b, ARSDK_DEVICE_TYPE_SKYCTRL_3},
 		{0x90, ARSDK_DEVICE_TYPE_SKYCTRL_UA},
+		{0x91, ARSDK_DEVICE_TYPE_SKYCTRL_4},
 		{0x6B, ARSDK_DEVICE_TYPE_JS},
 		{0x72, ARSDK_DEVICE_TYPE_JS_EVO_LIGHT},
 		{0x72, ARSDK_DEVICE_TYPE_JS_EVO_RACE},

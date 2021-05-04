@@ -710,11 +710,18 @@ int arsdk_backend_net_start_listen(struct arsdk_backend_net *self,
 		goto error;
 	}
 
-	/* Setup address to list on given port */
+	/* Setup address to listen on given port */
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
-	addr.sin_addr.s_addr = htonl(INADDR_ANY);
 	addr.sin_port = htons(port);
+	if (self->iface != NULL && self->iface[0] != '\0') {
+		res = get_ip_addr(&addr.sin_addr, self->iface);
+		if (res < 0)
+			goto error;
+	} else {
+		addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	}
+
 	res = pomp_ctx_listen(self->listen.ctx,
 			(const struct sockaddr *)&addr,
 			sizeof(addr));
@@ -901,11 +908,18 @@ int arsdk_backend_net_new(struct arsdk_mngr *mngr,
 	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_min == 0 ||
 			cfg->proto_v_min >= ARSDK_BACKEND_NET_PROTO_MIN,
 			-EINVAL);
+	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_max == 0 ||
+			cfg->proto_v_max >= ARSDK_BACKEND_NET_PROTO_MIN,
+			-EINVAL);
 #endif
 	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_max == 0 ||
 			cfg->proto_v_max <= ARSDK_BACKEND_NET_PROTO_MAX,
 			-EINVAL);
-	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_min <= cfg->proto_v_max,
+	ARSDK_RETURN_ERR_IF_FAILED(
+			(cfg->proto_v_max != 0 &&
+			 cfg->proto_v_min <= cfg->proto_v_max) ||
+			(cfg->proto_v_max == 0 &&
+			 cfg->proto_v_min <= ARSDK_BACKEND_NET_PROTO_MAX),
 			-EINVAL);
 
 	/* Allocate structure */

@@ -41,6 +41,11 @@
 	(uint32_t)(cls_id) << 16 | \
 	(uint32_t)(cmd_id))
 
+struct arsdk_binary {
+	const void *cdata;
+	uint32_t len;
+};
+
 /** Value structure */
 struct arsdk_value {
 	enum arsdk_arg_type type;   /**< value type */
@@ -58,6 +63,7 @@ struct arsdk_value {
 		double      f64;    /**< f64 value */
 		char        *str;   /**< str value */
 		const char  *cstr;  /**< cstr value */
+		struct arsdk_binary binary; /**< binary value */
 	} data; /**< value data */
 };
 

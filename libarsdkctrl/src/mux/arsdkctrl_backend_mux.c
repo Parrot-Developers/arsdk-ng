@@ -54,7 +54,14 @@ struct arsdk_device_conn {
 	char                                   *ctrl_type;
 	char                                   *device_id;
 	char                                   *txjson;
+	char                                   *rxjson;
 	int                                    stream_supported;
+	/** minimum protocol version supported */
+	uint32_t                               proto_v_min;
+	/** maximum protocol version supported */
+	uint32_t                               proto_v_max;
+	/** protocol version used */
+	uint32_t                               proto_v;
 };
 
 /** */
@@ -62,6 +69,10 @@ struct arsdkctrl_backend_mux {
 	struct arsdkctrl_backend               *parent;
 	struct mux_ctx                         *mux;
 	int                                    stream_supported;
+	/** minimum protocol version supported */
+	uint32_t                               proto_v_min;
+	/** maximum protocol version supported */
+	uint32_t                               proto_v_max;
 
 	struct {
 		struct arsdk_device_conn       *conn;
@@ -77,6 +88,7 @@ static int device_conn_setup_transport(struct arsdk_device_conn *self)
 
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.stream_supported = self->stream_supported;
+	cfg.proto_v = self->proto_v;
 	res = arsdk_transport_mux_new(self->mux, self->loop, &cfg,
 				&self->transport);
 	return res;
@@ -103,6 +115,7 @@ static void device_conn_destroy(struct arsdk_device_conn *self)
 	free(self->ctrl_name);
 	free(self->ctrl_type);
 	free(self->txjson);
+	free(self->rxjson);
 	free(self);
 }
 
@@ -113,6 +126,8 @@ static int device_conn_new(
 		const struct arsdk_device_conn_cfg *cfg,
 		const struct arsdk_device_conn_internal_cbs *cbs,
 		struct mux_ctx *mux,
+		uint32_t proto_v_min,
+		uint32_t proto_v_max,
 		int stream_supported,
 		struct pomp_loop *loop,
 		struct arsdk_device_conn **ret_conn)
@@ -136,6 +151,8 @@ static int device_conn_new(
 	self->cbs = *cbs;
 	self->state = DEVICE_CONN_STATE_IDLE;
 	self->stream_supported = stream_supported;
+	self->proto_v_min = proto_v_min;
+	self->proto_v_max = proto_v_max;
 
 	*ret_conn = self;
 	return 0;
@@ -178,15 +195,57 @@ out:
 
 /**
  */
+static uint32_t parse_proto_version(json_object *object)
+{
+	/* by default only the protocol version 1 is considered as supported */
+	uint32_t proto_v = ARSDK_PROTOCOL_VERSION_1;
+	json_object *jproto_v = NULL;
+
+	if (!object)
+		return 1;
+
+	jproto_v = get_json_object(object, ARSDK_CONN_JSON_KEY_PROTO_V);
+	if (jproto_v != NULL)
+		proto_v = json_object_get_int(jproto_v);
+
+	return proto_v;
+}
+
+/**
+ */
+static int device_conn_recv_json(struct arsdkctrl_backend_mux *self,
+		struct arsdk_device_conn *conn)
+{
+	json_object *jroot = NULL;
+
+	ARSDK_LOGI("Received json:");
+	ARSDK_LOGI_STR(conn->rxjson);
+
+	/* Parse json request */
+	jroot = json_tokener_parse(conn->rxjson);
+	if (jroot == NULL) {
+		ARSDK_LOGE("Failed to parse json response: '%s'", conn->rxjson);
+		return -EINVAL;
+	}
+
+	conn->proto_v = parse_proto_version(jroot);
+
+	/* Success */
+	json_object_put(jroot);
+	return 0;
+}
+
+/**
+ */
 static void backend_mux_rx_conn_resp(struct arsdkctrl_backend_mux *self,
 		struct pomp_msg *msg)
 {
 	int res = 0;
 	struct arsdk_device_conn *conn = self->client.conn;
 	int32_t status = 0;
-	char *rxjson = NULL;
 	const struct arsdk_device_info *info = NULL;
 	struct arsdk_device_info newinfo;
+	struct arsdk_transport_mux_cfg cfg = {0};
 
 	if (conn == NULL) {
 		ARSDK_LOGW("No connection pending");
@@ -195,30 +254,58 @@ static void backend_mux_rx_conn_resp(struct arsdkctrl_backend_mux *self,
 
 	res = pomp_msg_read(msg, MUX_ARSDK_MSG_FMT_DEC_CONN_RESP,
 			&status,
-			&rxjson);
+			&conn->rxjson);
 	if (res < 0) {
 		ARSDK_LOG_ERRNO("pomp_msg_read", -res);
 		return;
 	}
 
+	/* Parse received json */
+	res = device_conn_recv_json(self, conn);
+	if (res < 0) {
+		ARSDK_LOG_ERRNO("device_conn_recv_json", -res);
+		goto error;
+	}
+
 	if (status != 0) {
 		ARSDK_LOGI("Connection refused");
+		goto rejected;
+	}
 
-		/* Notify rejection */
-		self->client.conn = NULL;
-		(*conn->cbs.canceled)(conn->device, conn,
-				ARSDK_CONN_CANCEL_REASON_REJECTED,
-				conn->cbs.userdata);
-		device_conn_destroy(conn);
-		goto out;
+	/* Check the protocol version */
+	if (conn->proto_v < conn->proto_v_min &&
+	    conn->proto_v > conn->proto_v_max) {
+		ARSDK_LOGI("Bad protocol version (%d) not supported",
+				conn->proto_v);
+		goto rejected;
+	}
+
+	/* Setup proto_v for transport layer */
+	res = arsdk_transport_mux_get_cfg(conn->transport, &cfg);
+	if (res < 0) {
+		ARSDK_LOG_ERRNO("arsdk_transport_mux_get_cfg", -res);
+		goto error;
+	}
+	cfg.proto_v = conn->proto_v;
+	res = arsdk_transport_mux_update_cfg(conn->transport, &cfg);
+	if (res < 0) {
+		ARSDK_LOG_ERRNO("arsdk_transport_mux_update_cfg", -res);
+		goto error;
 	}
 
 	/* Update info */
 	res = arsdk_device_get_info(conn->device, &info);
-	if (res < 0)
-		goto out;
+	if (res < 0) {
+		ARSDK_LOG_ERRNO("arsdk_device_get_info", -res);
+		goto error;
+	}
 	newinfo = *info;
-	newinfo.json = rxjson;
+	newinfo.proto_v = conn->proto_v;
+	newinfo.json = conn->rxjson;
+	if (mux_get_remote_version(self->mux) == MUX_PROTOCOL_VERSION)
+		newinfo.api = ARSDK_DEVICE_API_FULL;
+	else
+		newinfo.api = ARSDK_DEVICE_API_UPDATE_ONLY;
 
 	/* Notify connection */
 	self->client.conn = NULL;
@@ -226,9 +313,24 @@ static void backend_mux_rx_conn_resp(struct arsdkctrl_backend_mux *self,
 	(*conn->cbs.connected)(conn->device, &newinfo, conn,
 			arsdk_transport_mux_get_parent(conn->transport),
 			conn->cbs.userdata);
+	return;
 
-out:
-	free(rxjson);
+rejected:
+	/* Notify rejection */
+	self->client.conn = NULL;
+	(*conn->cbs.canceled)(conn->device, conn,
+			ARSDK_CONN_CANCEL_REASON_REJECTED,
+			conn->cbs.userdata);
+	device_conn_destroy(conn);
+	return;
+
+error:
+	/* Notify local error */
+	self->client.conn = NULL;
+	(*conn->cbs.canceled)(conn->device, conn,
+			ARSDK_CONN_CANCEL_REASON_LOCAL,
+			conn->cbs.userdata);
+	device_conn_destroy(conn);
 }
 
 static void backend_mux_rx_data(struct arsdkctrl_backend_mux *backend,
@@ -290,6 +392,50 @@ static void backend_mux_channel_cb(struct mux_ctx *mux,
 	}
 }
 
+
+/**
+ */
+static int device_conn_format_json(struct arsdk_device_conn *conn)
+{
+	int res = 0;
+	json_object *jroot = NULL;
+	const char *newjson = NULL;
+
+	/* Parse given json */
+	if (conn->txjson != NULL)
+		jroot = json_tokener_parse(conn->txjson);
+	else
+		jroot = json_object_new_object();
+	if (jroot == NULL) {
+		res = -EINVAL;
+		goto out;
+	}
+
+	/* Add supported protocol versions */
+	json_object_object_add(jroot, ARSDK_CONN_JSON_KEY_PROTO_V_MIN,
+			json_object_new_int(conn->proto_v_min));
+	json_object_object_add(jroot, ARSDK_CONN_JSON_KEY_PROTO_V_MAX,
+			json_object_new_int(conn->proto_v_max));
+
+	/* Get updated json */
+	newjson = json_object_to_json_string(jroot);
+	if (newjson == NULL) {
+		res = -ENOMEM;
+		goto out;
+	}
+
+	free(conn->txjson);
+	conn->txjson = xstrdup(newjson);
+
+	ARSDK_LOGI("Sending json:");
+	ARSDK_LOGI_STR(conn->txjson);
+
+out:
+	if (jroot != NULL)
+		json_object_put(jroot);
+	return res;
+}
+
 /**
  */
 static int arsdkctrl_backend_mux_start_device_conn(
@@ -324,12 +470,17 @@ static int arsdkctrl_backend_mux_start_device_conn(
 
 	/* Create device connection context */
 	res = device_conn_new(device, cfg, cbs, self->mux,
+			self->proto_v_min, self->proto_v_max,
 			self->stream_supported, loop, &conn);
 	if (res < 0)
 		goto error;
 
 	/* Setup transport */
 	res = device_conn_setup_transport(conn);
+	if (res < 0)
+		goto error;
+
+	res = device_conn_format_json(conn);
 	if (res < 0)
 		goto error;
 
@@ -403,6 +554,23 @@ int arsdkctrl_backend_mux_new(struct arsdk_ctrl *ctrl,
 	ARSDK_RETURN_ERR_IF_FAILED(ret_obj != NULL, -EINVAL);
 	*ret_obj = NULL;
 	ARSDK_RETURN_ERR_IF_FAILED(cfg != NULL, -EINVAL);
+#if ARSDKCTRL_BACKEND_MUX_PROTO_MIN > 1
+	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_min == 0 ||
+			cfg->proto_v_min >= ARSDKCTRL_BACKEND_MUX_PROTO_MIN,
+			-EINVAL);
+	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_max == 0 ||
+			cfg->proto_v_max >= ARSDKCTRL_BACKEND_MUX_PROTO_MIN,
+			-EINVAL);
+#endif
+	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_max == 0 ||
+			cfg->proto_v_max <= ARSDKCTRL_BACKEND_MUX_PROTO_MAX,
+			-EINVAL);
+	ARSDK_RETURN_ERR_IF_FAILED(
+			(cfg->proto_v_max != 0 &&
+			 cfg->proto_v_min <= cfg->proto_v_max) ||
+			(cfg->proto_v_max == 0 &&
+			 cfg->proto_v_min <= ARSDKCTRL_BACKEND_MUX_PROTO_MAX),
+			-EINVAL);
 
 	/* Allocate structure */
 	self = calloc(1, sizeof(*self));
@@ -419,6 +587,11 @@ int arsdkctrl_backend_mux_new(struct arsdk_ctrl *ctrl,
 	self->mux = cfg->mux;
 	mux_ref(self->mux);
 	self->stream_supported = cfg->stream_supported;
+	/* by default all protocol versions implemented are supported */
+	self->proto_v_min = cfg->proto_v_min != 0 ? cfg->proto_v_min :
+			ARSDKCTRL_BACKEND_MUX_PROTO_MIN;
+	self->proto_v_max = cfg->proto_v_max != 0 ? cfg->proto_v_max :
+			ARSDKCTRL_BACKEND_MUX_PROTO_MAX;
 
 	/* Open channels for backend */
 	res = mux_channel_open(self->mux, MUX_ARSDK_CHANNEL_ID_BACKEND,

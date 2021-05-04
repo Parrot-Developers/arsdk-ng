@@ -88,7 +88,8 @@ static void check_fds(const int *fds1, const int *fds2)
 		if (!found) {
 			snprintf(path, sizeof(path), "/proc/self/fd/%d", *fds2);
 			target[0] = '\0';
-			readlink(path, target, sizeof(target));
+			if (readlink(path, target, sizeof(target)) < 0)
+				snprintf(target, sizeof(target), "???");
 			fprintf(stderr, "Leaked fd %d (%s)\n", *fds2, target);
 		}
 
@@ -140,12 +141,16 @@ int main(int argc, char *argv[])
 	WSAStartup(MAKEWORD(2, 0), &wsadata);
 #endif /* _WIN32 */
 
+#ifdef SIGPIPE
+	signal(SIGPIPE, SIG_IGN);
+#endif /* SIGPIPE */
+
 	/* Get initial list of open file descriptors */
 	fds1 = lsof();
 
 	/* Register tests */
 	CU_initialize_registry();
-	CU_register_suites(g_suites_protoc);
+	CU_register_suites(g_suites_cmd_itf);
 	CU_register_suites(g_suites_enc_dec);
 
 	if (argc >= 2 && (strcmp(argv[1], "-h") == 0

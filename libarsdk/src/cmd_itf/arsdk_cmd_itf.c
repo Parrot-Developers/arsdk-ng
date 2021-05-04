@@ -28,6 +28,7 @@
 #include "arsdk_cmd_itf_priv.h"
 #include "arsdk_cmd_itf1.h"
 #include "arsdk_cmd_itf2.h"
+#include "arsdk_cmd_itf3.h"
 #include "arsdk_default_log.h"
 
 /**
@@ -74,6 +75,19 @@ static void itf2_dispose(struct arsdk_cmd_itf2 *itf2, void *userdata)
 		(*self->cbs.dispose)(self, self->cbs.userdata);
 }
 
+static void itf3_dispose(struct arsdk_cmd_itf3 *itf3, void *userdata)
+{
+	struct arsdk_cmd_itf *self = userdata;
+	ARSDK_RETURN_IF_FAILED(self != NULL, -EINVAL);
+
+	/* Notify internal callbacks */
+	(*self->internal_cbs.dispose)(self, self->internal_cbs.userdata);
+
+	/* Notify command interface callback */
+	if (self->cbs.dispose)
+		(*self->cbs.dispose)(self, self->cbs.userdata);
+}
+
 /**
  */
 int arsdk_cmd_itf_new(struct arsdk_transport *transport,
@@ -91,6 +105,9 @@ int arsdk_cmd_itf_new(struct arsdk_transport *transport,
 	};
 	struct arsdk_cmd_itf2_cbs itf2_cbs = {
 		.dispose = &itf2_dispose,
+	};
+	struct arsdk_cmd_itf3_cbs itf3_cbs = {
+		.dispose = &itf3_dispose,
 	};
 
 	ARSDK_RETURN_ERR_IF_FAILED(ret_itf != NULL, -EINVAL);
@@ -110,7 +127,13 @@ int arsdk_cmd_itf_new(struct arsdk_transport *transport,
 	self->cbs = *cbs;
 	self->internal_cbs = *internal_cbs;
 	self->proto_v = arsdk_transport_get_proto_v(transport);
-	if (self->proto_v > 1) {
+
+	if (self->proto_v > 2) {
+		itf3_cbs.userdata = self;
+		res = arsdk_cmd_itf3_new(transport, &itf3_cbs, cbs, self,
+				tx_info_table, tx_count, ackoff,
+				&self->core.v3);
+	} else if (self->proto_v == 2) {
 		itf2_cbs.userdata = self;
 		res = arsdk_cmd_itf2_new(transport, &itf2_cbs, cbs, self,
 				tx_info_table, tx_count, ackoff,
@@ -137,7 +160,9 @@ int arsdk_cmd_itf_destroy(struct arsdk_cmd_itf *self)
 {
 	ARSDK_RETURN_ERR_IF_FAILED(self != NULL, -EINVAL);
 
-	if (self->proto_v > 1)
+	if (self->proto_v > 2)
+		arsdk_cmd_itf3_destroy(self->core.v3);
+	else if (self->proto_v == 2)
 		arsdk_cmd_itf2_destroy(self->core.v2);
 	else
 		arsdk_cmd_itf1_destroy(self->core.v1);
@@ -171,7 +196,9 @@ int arsdk_cmd_itf_stop(struct arsdk_cmd_itf *self)
 
 	ARSDK_RETURN_ERR_IF_FAILED(self != NULL, -EINVAL);
 
-	if (self->proto_v > 1)
+	if (self->proto_v > 2)
+		res = arsdk_cmd_itf3_stop(self->core.v3);
+	else if (self->proto_v == 2)
 		res = arsdk_cmd_itf2_stop(self->core.v2);
 	else
 		res = arsdk_cmd_itf1_stop(self->core.v1);
@@ -190,7 +217,10 @@ int arsdk_cmd_itf_send(struct arsdk_cmd_itf *self,
 
 	ARSDK_RETURN_ERR_IF_FAILED(self != NULL, -EINVAL);
 
-	if (self->proto_v > 1) {
+	if (self->proto_v > 2) {
+		res = arsdk_cmd_itf3_send(self->core.v3, cmd, send_status,
+				userdata);
+	} else if (self->proto_v == 2) {
 		res = arsdk_cmd_itf2_send(self->core.v2, cmd, send_status,
 				userdata);
 	} else {
@@ -211,7 +241,9 @@ int arsdk_cmd_itf_recv_data(struct arsdk_cmd_itf *self,
 
 	ARSDK_RETURN_ERR_IF_FAILED(self != NULL, -EINVAL);
 
-	if (self->proto_v > 1)
+	if (self->proto_v > 2)
+		res = arsdk_cmd_itf3_recv_data(self->core.v3, header, payload);
+	else if (self->proto_v == 2)
 		res = arsdk_cmd_itf2_recv_data(self->core.v2, header, payload);
 	else
 		res = arsdk_cmd_itf1_recv_data(self->core.v1, header, payload);

@@ -41,6 +41,7 @@
 #include <sys/stat.h>
 
 #include "arsdk/arsdk.h"
+#include "arsdkctrl/arsdkctrl.h"
 
 #include <CUnit/CUnit.h>
 #include <CUnit/Basic.h>
@@ -48,7 +49,8 @@
 
 /**
  */
-extern CU_SuiteInfo g_suites_protoc[];
+extern CU_SuiteInfo g_suites_cmd_itf[];
+
 /**
  */
 extern CU_SuiteInfo g_suites_enc_dec[];

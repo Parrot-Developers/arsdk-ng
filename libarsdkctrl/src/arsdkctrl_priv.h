@@ -92,7 +92,7 @@ struct arsdkctrl_backend {
 	char                                    *name;
 	enum arsdk_backend_type                 type;
 	void                                    *child;
-	const struct arsdkctrl_backend_ops     *ops;
+	const struct arsdkctrl_backend_ops      *ops;
 	void                                    *osdata;
 	struct arsdk_ctrl                       *ctrl;
 };
@@ -110,10 +110,23 @@ struct arsdk_discovery {
 
 /** device tcp proxy */
 struct arsdk_device_tcp_proxy {
-	struct arsdk_device     *device;        /**< device to access.*/
-	char                    *addr;          /**< address to connect.*/
-	uint16_t                port;           /**< port to connect.*/
-	struct mux_tcp_proxy    *mux_tcp_proxy; /**< mux tcp proxy.*/
+	/** device to access. */
+	struct arsdk_device *device;
+	/** address to connect. */
+	char *addr;
+	/** port to connect. */
+	uint16_t port;
+#ifdef LIBMUX_LEGACY
+	/** mux tcp proxy. */
+	struct mux_tcp_proxy *mux_tcp_proxy;
+#else
+	/** mux tcp proxy. */
+	struct mux_ip_proxy *mux_tcp_proxy;
+	/** '1' if closed otherwise '0'. */
+	int is_closed;
+	/** event callbacks. */
+	struct arsdk_device_tcp_proxy_cbs cbs;
+#endif
 };
 
 int arsdk_device_new(struct arsdkctrl_backend *backend,

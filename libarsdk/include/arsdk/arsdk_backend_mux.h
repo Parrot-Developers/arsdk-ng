@@ -31,10 +31,21 @@
 struct mux_ctx;
 struct arsdk_backend_mux;
 
+/** minimum protocol version implemented */
+#define ARSDK_BACKEND_MUX_PROTO_MIN ARSDK_PROTOCOL_VERSION_1
+/** maximum protocol version implemented */
+#define ARSDK_BACKEND_MUX_PROTO_MAX ARSDK_PROTOCOL_VERSION_3
+
 /** */
 struct arsdk_backend_mux_cfg {
 	struct mux_ctx *mux;
 	int stream_supported;
+	/** minimum protocol version supported */
+	uint32_t                               proto_v_min;
+	/** maximum protocol version supported */
+	uint32_t                               proto_v_max;
+	/** protocol version used */
+	uint32_t                               proto_v;
 };
 
 ARSDK_API int arsdk_backend_mux_new(struct arsdk_mngr *mngr,

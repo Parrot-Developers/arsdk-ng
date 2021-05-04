@@ -31,18 +31,38 @@
 struct mux_ctx;
 struct arsdkctrl_backend_mux;
 
+/** minimum protocol version implemented */
+#define ARSDKCTRL_BACKEND_MUX_PROTO_MIN ARSDK_PROTOCOL_VERSION_1
+/** maximum protocol version implemented */
+#define ARSDKCTRL_BACKEND_MUX_PROTO_MAX ARSDK_PROTOCOL_VERSION_3
+
 /** */
 struct arsdkctrl_backend_mux_cfg {
 	struct mux_ctx *mux;
+	/**
+	 * stream internal support:
+	 * - Set to 1 to internally handle default streaming channel (port
+	 *   allocation and exchange in json)
+	 * - Set to 0 to handle it externally (no port allocation nor automatic
+	 *   exchange in json, it is up to application to do it)
+	 */
 	int stream_supported;
-};
-
-/** */
-struct arsdk_device_mux_cfg {
-	const char              *name;
-	enum arsdk_device_type  type;
-	const char              *id;
-	const char              *discovery;
+	/**
+	 * minimum protocol version supported.
+	 * must be equal or greater than 'ARSDKCTRL_BACKEND_NET_PROTO_MIN';
+	 * be equal or less than 'ARSDKCTRL_BACKEND_NET_PROTO_MAX' and
+	 * be equal or less than 'proto_v_max'.
+	 * '0' is considered as 'ARSDKCTRL_BACKEND_NET_PROTO_MIN'.
+	 */
+	uint32_t proto_v_min;
+	/**
+	 * Maximum protocol version supported.
+	 * Must be equal or greater than 'ARSDKCTRL_BACKEND_NET_PROTO_MIN';
+	 * be equal or less than 'ARSDKCTRL_BACKEND_NET_PROTO_MAX' and
+	 * be equal or greater than 'proto_v_min'.
+	 * '0' is considered as 'ARSDKCTRL_BACKEND_NET_PROTO_MAX'.
+	 */
+	uint32_t proto_v_max;
 };
 
 ARSDK_API int arsdkctrl_backend_mux_new(struct arsdk_ctrl *ctrl,
@@ -55,13 +75,6 @@ ARSDK_API struct arsdkctrl_backend *
 arsdkctrl_backend_mux_get_parent(struct arsdkctrl_backend_mux *self);
 
 ARSDK_API struct mux_ctx *arsdkctrl_backend_mux_get_mux_ctx(
-		struct arsdkctrl_backend_mux *self);
-
-ARSDK_API int arsdkctrl_backend_mux_start_listen(
-		struct arsdkctrl_backend_mux *self,
-		const struct arsdk_backend_listen_cbs *cbs);
-
-ARSDK_API int arsdkctrl_backend_mux_stop_listen(
 		struct arsdkctrl_backend_mux *self);
 
 #endif /* _ARSDKCTRL_BACKEND_MUX_H_ */

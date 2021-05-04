@@ -53,7 +53,11 @@ static int encoder_init(struct encoder *enc)
 		return -ENOMEM;
 
 	/* Get data from buffer */
-	pomp_buffer_get_data(enc->buf, &enc->data, &enc->len, &enc->capacity);
+	int res = pomp_buffer_get_data(enc->buf, &enc->data, &enc->len,
+			&enc->capacity);
+	if (res < 0)
+		return res;
+
 	enc->off = 0;
 	return 0;
 }
@@ -84,8 +88,8 @@ static int encoder_ensure_capacity(struct encoder *enc, size_t capacity)
 		return res;
 
 	/* Get data from buffer */
-	pomp_buffer_get_data(enc->buf, &enc->data, &enc->len, &enc->capacity);
-	return 0;
+	return pomp_buffer_get_data(enc->buf, &enc->data, &enc->len,
+			&enc->capacity);
 }
 
 /**
@@ -206,6 +210,24 @@ static int encoder_write_f64(struct encoder *enc, double v)
 
 /**
  */
+static int encoder_write_binary(struct encoder *enc,
+		const struct arsdk_binary *binary)
+{
+	int res = 0;
+
+	res = encoder_write_u32(enc, binary->len);
+	if (res < 0)
+		return res;
+
+	res = encoder_write(enc, binary->cdata, binary->len);
+	if (res < 0)
+		return res;
+
+	return res;
+}
+
+/**
+ */
 static int cmd_encv_internal(struct arsdk_cmd *cmd,
 			     const struct arsdk_cmd_desc *desc, size_t argc,
 			     const struct arsdk_value *argv, va_list args)
@@ -215,6 +237,7 @@ static int cmd_encv_internal(struct arsdk_cmd *cmd,
 	uint32_t i = 0;
 	const struct arsdk_arg_desc *arg_desc = NULL;
 	struct arsdk_value val;
+	memset(&val, 0, sizeof(val));
 
 	ARSDK_RETURN_ERR_IF_FAILED(cmd != NULL, -EINVAL);
 	ARSDK_RETURN_ERR_IF_FAILED(desc != NULL, -EINVAL);
@@ -383,6 +406,18 @@ static int cmd_encv_internal(struct arsdk_cmd *cmd,
 				val.data.i32 = va_arg(args, int);
 			}
 			res = encoder_write_i32(&enc, val.data.i32);
+			if (res < 0)
+				goto out;
+			break;
+
+		case ARSDK_ARG_TYPE_BINARY:
+			if (argv == NULL) {
+				val.type = ARSDK_ARG_TYPE_BINARY;
+				val.data.binary = *va_arg(args,
+						const struct arsdk_binary *);
+			}
+
+			res = encoder_write_binary(&enc, &val.data.binary);
 			if (res < 0)
 				goto out;
 			break;

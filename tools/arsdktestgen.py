@@ -63,6 +63,7 @@ def _get_arg_type_c_name(argType):
         arsdkparser.ArArgType.FLOAT: "float",
         arsdkparser.ArArgType.DOUBLE: "double",
         arsdkparser.ArArgType.STRING: "const char *",
+        arsdkparser.ArArgType.BINARY: "struct arsdk_binary",
     }
     return table[argType]
 
@@ -79,6 +80,7 @@ def _get_arg_default_val(argType):
         arsdkparser.ArArgType.FLOAT: "1.5",
         arsdkparser.ArArgType.DOUBLE: "-2.2",
         arsdkparser.ArArgType.STRING: "\"ABC\"",
+	arsdkparser.ArArgType.BINARY: "&s_binary_val",
     }
     return table[argType]
 
@@ -86,7 +88,7 @@ def _get_ftr_cls(ftr):
     if ftr.classes:
         return ftr.classes
     else:
-        defcls = arsdkparser.ArClass(_DEFAULT_CLS_NAME, 0, _DEFAULT_CLS_NAME)
+        defcls = arsdkparser.ArClass(_DEFAULT_CLS_NAME, 0, "", _DEFAULT_CLS_NAME)
         defcls.cmds = ftr.getMsgs()
         return [defcls]
 
@@ -110,7 +112,7 @@ def gen_test_dec_cmds(ctx, ftr, cls, msg, out):
             out.write("\t%s", _get_arg_type_c_name(argObj.argType))
         if argObj.argType != arsdkparser.ArArgType.STRING:
             out.write(" ")
-        out.write("_%s;" % argObj.name)
+        out.write("_%s;\n" % argObj.name)
     out.write("\n")
 
     msgName = _get_msg_name(cls, msg)
@@ -126,21 +128,24 @@ def gen_test_dec_cmds(ctx, ftr, cls, msg, out):
     out.write("\n")
 
     for argObj in msg.args:
-        if argObj.argType != arsdkparser.ArArgType.STRING:
-            out.write("\tCU_ASSERT_EQUAL(_%s, " % argObj.name)
-        else:
+        if argObj.argType == arsdkparser.ArArgType.STRING:
             out.write("\tCU_ASSERT_STRING_EQUAL(_%s, " % argObj.name)
+        elif argObj.argType == arsdkparser.ArArgType.BINARY:
+            out.write("\tCU_ASSERT_EQUAL(memcmp(&_%s, " % argObj.name)
+        else:
+            out.write("\tCU_ASSERT_EQUAL(_%s, " % argObj.name)
 
         if isinstance(argObj.argType, arsdkparser.ArEnum):
             out.write("ARSDK_%s_%s_%s",
                 _to_c_enum(ftr.name),
                 _to_c_enum(argObj.argType.name),
                 _to_c_enum(argObj.argType.values[0].name))
+        elif isinstance(argObj.argType, arsdkparser.ArBitfield):
+            out.write("%s",_get_arg_default_val(argObj.argType.btfType))
+        elif argObj.argType == arsdkparser.ArArgType.BINARY:
+            out.write("&s_binary_val, sizeof(s_binary_val)), 0")
         else:
-            if isinstance(argObj.argType, arsdkparser.ArBitfield):
-                out.write("%s",_get_arg_default_val(argObj.argType.btfType))
-            else:
-                out.write("%s",_get_arg_default_val(argObj.argType))
+            out.write("%s",_get_arg_default_val(argObj.argType))
         out.write(");\n")
     out.write("}\n")
     out.write("\n")
@@ -253,6 +258,14 @@ def gen_protoc_c(ctx, out):
     out.write("static struct test_msg s_test_msg = {\n")
     out.write("\t.msgid = 0,\n")
     out.write("\t.cmd_itf = NULL,\n")
+    out.write("};\n")
+    out.write("\n")
+
+    out.write("/** */\n")
+    out.write("static const uint8_t s_binary_data[] = {0x01, 0x02};\n")
+    out.write("static const struct arsdk_binary s_binary_val = {\n")
+    out.write("\t.cdata = s_binary_data,\n")
+    out.write("\t.len = sizeof(s_binary_data),\n")
     out.write("};\n")
     out.write("\n")
 

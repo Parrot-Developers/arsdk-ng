@@ -221,6 +221,24 @@ static int decoder_read_cstr(struct decoder *dec, const char **v)
 
 /**
  */
+static int decoder_read_binary(struct decoder *dec,
+		struct arsdk_binary *binary)
+{
+	int res = 0;
+
+	res = decoder_read_u32(dec, &binary->len);
+	if (res < 0)
+		return res;
+
+	res = decoder_cread(dec, &binary->cdata, binary->len);
+	if (res < 0)
+		return res;
+
+	return res;
+}
+
+/**
+ */
 #if defined(__GNUC__) && defined(__MINGW32__) && !defined(__clang__)
 __attribute__((__format__(__gnu_printf__, 4, 5)))
 #elif defined(__GNUC__)
@@ -431,6 +449,13 @@ int arsdk_cmd_dec(const struct arsdk_cmd *cmd,
 			*va_arg(args, int32_t *) = val.data.i32;
 			break;
 
+		case ARSDK_ARG_TYPE_BINARY:
+			res = decoder_read_binary(&dec,
+					va_arg(args, struct arsdk_binary *));
+			if (res < 0)
+				goto out;
+			break;
+
 		default:
 			res = -EINVAL;
 			ARSDK_LOGW("decoder: unknown argument type %d",
@@ -614,6 +639,12 @@ int arsdk_cmd_get_values(const struct arsdk_cmd *cmd,
 			/* enum shall be extracted as i32 */
 			values[i].type = ARSDK_ARG_TYPE_ENUM;
 			res = decoder_read_i32(&dec, &values[i].data.i32);
+			break;
+
+		case ARSDK_ARG_TYPE_BINARY:
+			values[i].type = ARSDK_ARG_TYPE_BINARY;
+			res = decoder_read_binary(&dec,
+					&values[i].data.binary);
 			break;
 
 		default:
@@ -828,6 +859,18 @@ int arsdk_cmd_fmt(const struct arsdk_cmd *cmd, char *buf, size_t len)
 			} else {
 				fmt_append(buf, len, &off,
 						"UNKNOWN(%d)", val.data.i32);
+			}
+			break;
+
+		case ARSDK_ARG_TYPE_BINARY:
+			val.type = ARSDK_ARG_TYPE_BINARY;
+			res = decoder_read_binary(&dec, &val.data.binary);
+			if (res < 0)
+				goto out;
+			for (i = 0; i < val.data.binary.len; i++) {
+				fmt_append(buf, len, &off, "%02x",
+					((const uint8_t *)
+					(val.data.binary.cdata))[i]);
 			}
 			break;
 

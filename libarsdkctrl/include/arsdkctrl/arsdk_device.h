@@ -40,11 +40,24 @@ enum arsdk_device_state {
 };
 
 /**
+ * Device API capabilities.
+ */
+enum arsdk_device_api {
+	/** API capabilities unknown. */
+	ARSDK_DEVICE_API_UNKNOWN,
+	/** Full API supported. */
+	ARSDK_DEVICE_API_FULL,
+	/** Update API only. */
+	ARSDK_DEVICE_API_UPDATE_ONLY,
+};
+
+/**
  * Device information.
  */
 struct arsdk_device_info {
 	enum arsdk_backend_type  backend_type;  /**< Underlying backend type */
 	uint32_t                 proto_v;       /**< Protocol version */
+	enum arsdk_device_api    api;           /**< API capabilities */
 	enum arsdk_device_state  state;         /**< State */
 	const char               *name;         /**< Name */
 	enum arsdk_device_type   type;          /**< Type */
@@ -284,11 +297,36 @@ ARSDK_API int arsdk_device_get_ephemeris_itf(
 		struct arsdk_device *self,
 		struct arsdk_ephemeris_itf **ret_itf);
 
+/** Device tcp proxy event callbacks */
+struct arsdk_device_tcp_proxy_cbs {
+	/** User data given in callbacks */
+	void *userdata;
+
+	/**
+	 * Function called at the local socket opening.
+	 *
+	 * @param self : Proxy object.
+	 * @param localport : Proxy local socket port.
+	 * @param userdata : User data.
+	 */
+	void (*open)(struct arsdk_device_tcp_proxy *self, uint16_t localport,
+			void *userdata);
+
+	/**
+	 * Function called at the local socket closing.
+	 *
+	 * @param self : Proxy object.
+	 * @param userdata : User data.
+	 */
+	void (*close)(struct arsdk_device_tcp_proxy *self, void *userdata);
+};
+
 /**
  * Create a tcp proxy to a device
  * @param self : device object.
  * @param dev_type : type of the device to access.
  * @param port : port to access.
+ * @param cbs : proxy event callbacks.
  * @param ret_proxy : will receive the tcp proxy object.
  * @return 0 in case of success, negative errno value in case of error.
  * @note arsdk_device_destroy_tcp_proxy must be call to destroy the proxy.
@@ -296,6 +334,9 @@ ARSDK_API int arsdk_device_get_ephemeris_itf(
 ARSDK_API int arsdk_device_create_tcp_proxy(struct arsdk_device *self,
 		enum arsdk_device_type dev_type,
 		uint16_t port,
+#ifndef LIBMUX_LEGACY
+		struct arsdk_device_tcp_proxy_cbs *cbs,
+#endif
 		struct arsdk_device_tcp_proxy **ret_proxy);
 
 /**
@@ -317,7 +358,7 @@ ARSDK_API const char *arsdk_device_tcp_proxy_get_addr(
 /**
  * Get device tcp proxy port.
  * @param proxy : device tcp proxy.
- * @return port of the proxy in case of success,
+ * @return port of the proxy or '0' if the proxy is not opened,
  *         negative errno value in case of error.
  */
 ARSDK_API int arsdk_device_tcp_proxy_get_port(

@@ -50,6 +50,12 @@ struct arsdk_peer_conn {
 	struct mux_ctx                         *mux;
 	struct pomp_loop                       *loop;
 	struct arsdk_transport_mux             *transport;
+	/** minimum protocol version supported */
+	uint32_t                               proto_v_min;
+	/** maximum protocol version supported */
+	uint32_t                               proto_v_max;
+	/** protocol version used */
+	uint32_t                               proto_v;
 };
 
 /** */
@@ -63,6 +69,11 @@ struct arsdk_backend_mux {
 		struct arsdk_peer_conn           *conn;
 		int                              running;
 	} listen;
+
+	/** minimum protocol version supported */
+	uint32_t                               proto_v_min;
+	/** maximum protocol version supported */
+	uint32_t                               proto_v_max;
 };
 
 /**
@@ -74,6 +85,7 @@ static int peer_conn_setup_transport(struct arsdk_peer_conn *self)
 
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.stream_supported = self->backend->stream_supported;
+	cfg.proto_v = self->proto_v;
 	res = arsdk_transport_mux_new(self->mux, self->loop, &cfg,
 			&self->transport);
 	return res;
@@ -114,6 +126,8 @@ static int peer_conn_destroy(struct arsdk_peer_conn *self)
 /**
  */
 static int peer_conn_new(struct arsdk_backend_mux *backend,
+		uint32_t proto_v_min,
+		uint32_t proto_v_max,
 		struct arsdk_peer_conn **ret_conn)
 {
 	struct arsdk_peer_conn *self = NULL;
@@ -129,6 +143,8 @@ static int peer_conn_new(struct arsdk_backend_mux *backend,
 	self->backend = backend;
 	self->mux = backend->mux;
 	self->state = PEER_CONN_STATE_PENDING;
+	self->proto_v_min = proto_v_min;
+	self->proto_v_max = proto_v_max;
 	*ret_conn = self;
 	return 0;
 }
@@ -170,6 +186,59 @@ out:
 
 /**
  */
+static void parse_proto_versions(json_object *object,
+		uint32_t *v_min, uint32_t *v_max)
+{
+	/* by default only the protocol version 1 is considered as supported */
+	uint32_t proto_v_min = 1;
+	uint32_t proto_v_max = 1;
+	json_object *jobj = NULL;
+
+	if (!object)
+		goto out;
+
+	jobj = get_json_object(object, ARSDK_CONN_JSON_KEY_PROTO_V_MIN);
+	if (jobj != NULL)
+		proto_v_min = json_object_get_int(jobj);
+
+	jobj = get_json_object(object, ARSDK_CONN_JSON_KEY_PROTO_V_MAX);
+	if (jobj != NULL)
+		proto_v_max = json_object_get_int(jobj);
+
+out:
+	*v_min = proto_v_min;
+	*v_max = proto_v_max;
+}
+
+static int peer_conn_json_parse(char *rxjson,
+		uint32_t *proto_v_min, uint32_t *proto_v_max)
+{
+	json_object *jroot = NULL;
+
+	if (rxjson == NULL)
+		return -EINVAL;
+
+	ARSDK_LOGI("Received json:");
+	ARSDK_LOGI_STR(rxjson);
+
+	/* Parse json request */
+	jroot = json_tokener_parse(rxjson);
+	if (jroot == NULL) {
+		ARSDK_LOGE("Failed to parse json request: '%s'", rxjson);
+		return -EINVAL;
+	}
+
+	/* Parse supported protocol versions:
+	 * by default only the protocol version 1 is considered as supported */
+	parse_proto_versions(jroot, proto_v_min, proto_v_max);
+
+	/* Success */
+	json_object_put(jroot);
+	return 0;
+}
+
+/**
+ */
 static void backend_mux_rx_conn_req(struct arsdk_backend_mux *self,
 		struct pomp_msg *msg)
 {
@@ -178,6 +247,10 @@ static void backend_mux_rx_conn_req(struct arsdk_backend_mux *self,
 	char *ctrl_type = NULL;
 	char *device_id = NULL;
 	char *rxjson = NULL;
+	uint32_t req_proto_v_min;
+	uint32_t req_proto_v_max;
+	uint32_t proto_v_min;
+	uint32_t proto_v_max;
 	struct arsdk_peer_info info;
 	const struct arsdk_peer_info *pinfo = NULL;
 
@@ -200,19 +273,45 @@ static void backend_mux_rx_conn_req(struct arsdk_backend_mux *self,
 	}
 
 	/* Only one pending connection request at a time */
-	if (self->listen.conn != NULL || peer_conn_new(
-			self, &self->listen.conn) < 0) {
+	if (self->listen.conn != NULL) {
 		ARSDK_LOGI("Connection request already in progress");
 		goto out;
 	}
+
+	res = peer_conn_new(self, self->proto_v_min, self->proto_v_max,
+			&self->listen.conn);
+	if (res < 0)
+		goto out;
+
+	/* Parse json request */
+	res = peer_conn_json_parse(rxjson, &req_proto_v_min, &req_proto_v_max);
+	if (res < 0)
+		goto out;
+
+	/* choose the real protocol version according to
+	 * the protocol versions supported by the peer and the backend */
+	proto_v_min = MAX(req_proto_v_min, self->listen.conn->proto_v_min);
+	proto_v_max = MIN(req_proto_v_max, self->listen.conn->proto_v_max);
+	if (proto_v_min > proto_v_max) {
+		ARSDK_LOGW("peer protocol versions supported[%d:%d] "
+			   "don't match with "
+			   "backend protocol versions supported[%d:%d]",
+			   req_proto_v_min,
+			   req_proto_v_max,
+			   self->listen.conn->proto_v_min,
+			   self->listen.conn->proto_v_max);
+		goto out;
+	}
+	self->listen.conn->proto_v = proto_v_max;
 
 	/* Create peer */
 	info.ctrl_name = ctrl_name;
 	info.ctrl_type = ctrl_type;
 	info.device_id = device_id;
+	info.proto_v = proto_v_max;
 	info.json = rxjson;
 
-	/* create peer */
+	/* Create peer */
 	res = arsdk_backend_create_peer(self->parent, &info,
 			self->listen.conn, &self->listen.conn->peer);
 	if (res < 0)
@@ -289,6 +388,50 @@ static void backend_mux_channel_cb(struct mux_ctx *mux,
 	}
 }
 
+static int peer_conn_send_json(struct arsdk_backend_mux *self,
+		struct arsdk_peer_conn *conn,
+		int status, const char *json)
+{
+	int res = 0;
+	json_object *jroot = NULL;
+	const char *newjson = NULL;
+
+	/* Parse given json */
+	if (json != NULL)
+		jroot = json_tokener_parse(json);
+	else
+		jroot = json_object_new_object();
+	if (jroot == NULL) {
+		res = -EINVAL;
+		goto out;
+	}
+
+	/* Add protocol version to use */
+	json_object_object_add(jroot, ARSDK_CONN_JSON_KEY_PROTO_V,
+			json_object_new_int(conn->proto_v));
+
+
+	/* Get updated json */
+	newjson = json_object_to_json_string(jroot);
+	if (newjson == NULL) {
+		res = -ENOMEM;
+		goto out;
+	}
+	ARSDK_LOGI("Sending json:");
+	ARSDK_LOGI_STR(newjson);
+
+	res = backend_mux_write_msg(self, MUX_ARSDK_MSG_ID_CONN_RESP,
+			MUX_ARSDK_MSG_FMT_ENC_CONN_RESP,
+			0, newjson);
+	if (res < 0)
+		goto out;
+
+out:
+	if (jroot != NULL)
+		json_object_put(jroot);
+	return res;
+}
+
 /**
  */
 static int arsdk_backend_mux_accept_peer_conn(
@@ -323,9 +466,8 @@ static int arsdk_backend_mux_accept_peer_conn(
 	if (res < 0)
 		goto error;
 
-	res = backend_mux_write_msg(self, MUX_ARSDK_MSG_ID_CONN_RESP,
-			MUX_ARSDK_MSG_FMT_ENC_CONN_RESP,
-			0, cfg->json ? cfg->json : "{}");
+	/* Send json response */
+	res = peer_conn_send_json(self, conn, 0, cfg->json);
 	if (res < 0)
 		goto error;
 
@@ -447,6 +589,23 @@ int arsdk_backend_mux_new(struct arsdk_mngr *mngr,
 	ARSDK_RETURN_ERR_IF_FAILED(ret_obj != NULL, -EINVAL);
 	*ret_obj = NULL;
 	ARSDK_RETURN_ERR_IF_FAILED(cfg != NULL, -EINVAL);
+#if ARSDK_BACKEND_NET_PROTO_MIN > 1
+	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_min == 0 ||
+			cfg->proto_v_min >= ARSDK_BACKEND_MUX_PROTO_MIN,
+			-EINVAL);
+	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_max == 0 ||
+			cfg->proto_v_max >= ARSDK_BACKEND_MUX_PROTO_MIN,
+			-EINVAL);
+#endif
+	ARSDK_RETURN_ERR_IF_FAILED(cfg->proto_v_max == 0 ||
+			cfg->proto_v_max <= ARSDK_BACKEND_MUX_PROTO_MAX,
+			-EINVAL);
+	ARSDK_RETURN_ERR_IF_FAILED(
+			(cfg->proto_v_max != 0 &&
+			 cfg->proto_v_min <= cfg->proto_v_max) ||
+			(cfg->proto_v_max == 0 &&
+			 cfg->proto_v_min <= ARSDK_BACKEND_MUX_PROTO_MAX),
+			-EINVAL);
 
 	/* Allocate structure */
 	self = calloc(1, sizeof(*self));
@@ -463,6 +622,13 @@ int arsdk_backend_mux_new(struct arsdk_mngr *mngr,
 	self->mux = cfg->mux;
 	mux_ref(self->mux);
 	self->stream_supported = cfg->stream_supported;
+		self->proto_v_min = cfg->proto_v_min;
+	self->proto_v_max = cfg->proto_v_max;
+	/* by default all protocol versions implemented are supported */
+	self->proto_v_min = cfg->proto_v_min != 0 ? self->proto_v_min :
+			ARSDK_BACKEND_MUX_PROTO_MIN;
+	self->proto_v_max = cfg->proto_v_max != 0 ? self->proto_v_max :
+			ARSDK_BACKEND_MUX_PROTO_MAX;
 
 	/* Open channels for backend */
 	res = mux_channel_open(self->mux, MUX_ARSDK_CHANNEL_ID_BACKEND,

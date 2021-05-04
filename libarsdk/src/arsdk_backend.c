@@ -53,6 +53,7 @@ const char *arsdk_device_type_str(enum arsdk_device_type val)
 	case ARSDK_DEVICE_TYPE_ANAFI4K: return "ANAFI4K";
 	case ARSDK_DEVICE_TYPE_ANAFI_THERMAL: return "ANAFI_THERMAL";
 	case ARSDK_DEVICE_TYPE_CHIMERA: return "CHIMERA";
+	case ARSDK_DEVICE_TYPE_ANAFI_2: return "ANAFI_2";
 	case ARSDK_DEVICE_TYPE_ANAFI_UA: return "ANAFI_UA";
 	case ARSDK_DEVICE_TYPE_ANAFI_USA: return "ANAFI_USA";
 	case ARSDK_DEVICE_TYPE_SKYCTRL: return "SKYCTRL";
@@ -61,6 +62,7 @@ const char *arsdk_device_type_str(enum arsdk_device_type val)
 	case ARSDK_DEVICE_TYPE_SKYCTRL_NG: return "SKYCTRL_NG";
 	case ARSDK_DEVICE_TYPE_SKYCTRL_3: return "SKYCTRL_3";
 	case ARSDK_DEVICE_TYPE_SKYCTRL_UA: return "SKYCTRL_UA";
+	case ARSDK_DEVICE_TYPE_SKYCTRL_4: return "SKYCTRL_4";
 	case ARSDK_DEVICE_TYPE_JS: return "JS";
 	case ARSDK_DEVICE_TYPE_JS_EVO_LIGHT: return "JS_EVO_LIGHT";
 	case ARSDK_DEVICE_TYPE_JS_EVO_RACE: return "JS_EVO_RACE";

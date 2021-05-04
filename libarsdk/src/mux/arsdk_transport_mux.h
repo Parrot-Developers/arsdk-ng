@@ -31,6 +31,8 @@
 struct arsdk_transport_mux;
 
 struct arsdk_transport_mux_cfg {
+	/** protocol version to used */
+	uint32_t   proto_v;
 	int        stream_supported;
 };
 
@@ -42,5 +44,11 @@ ARSDK_API int arsdk_transport_mux_new(
 
 ARSDK_API struct arsdk_transport *arsdk_transport_mux_get_parent(
 		struct arsdk_transport_mux *self);
+
+ARSDK_API int arsdk_transport_mux_get_cfg(struct arsdk_transport_mux *self,
+		struct arsdk_transport_mux_cfg *cfg);
+
+ARSDK_API int arsdk_transport_mux_update_cfg(struct arsdk_transport_mux *self,
+		const struct arsdk_transport_mux_cfg *cfg);
 
 #endif /* _ARSDK_TRANSPORT_MUX_H_ */

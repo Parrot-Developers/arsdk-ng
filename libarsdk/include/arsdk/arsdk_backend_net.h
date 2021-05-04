@@ -33,7 +33,7 @@ struct arsdk_backend_net;
 /** minimum protocol version implemented */
 #define ARSDK_BACKEND_NET_PROTO_MIN ARSDK_PROTOCOL_VERSION_1
 /** maximum protocol version implemented */
-#define ARSDK_BACKEND_NET_PROTO_MAX ARSDK_PROTOCOL_VERSION_2
+#define ARSDK_BACKEND_NET_PROTO_MAX ARSDK_PROTOCOL_VERSION_3
 
 /** */
 struct arsdk_backend_net_cfg {

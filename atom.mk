@@ -36,6 +36,7 @@ LOCAL_SRC_FILES := \
 	libarsdk/src/cmd_itf/arsdk_cmd_itf.c \
 	libarsdk/src/cmd_itf/arsdk_cmd_itf1.c \
 	libarsdk/src/cmd_itf/arsdk_cmd_itf2.c \
+	libarsdk/src/cmd_itf/arsdk_cmd_itf3.c \
 	libarsdk/src/arsdk_decoder.c \
 	libarsdk/src/arsdk_mngr.c \
 	libarsdk/src/arsdk_encoder.c \
@@ -94,7 +95,7 @@ LOCAL_GENERATED_SRC_FILES := \
 LOCAL_CUSTOM_MACROS := \
 	arsdkgen-macro:$(LOCAL_PATH)/tools/libarsdkgen.py,$(call local-get-build-dir)/gen
 
-include $(BUILD_STATIC_LIBRARY)
+include $(BUILD_LIBRARY)
 
 
 ###############################################################################
@@ -141,9 +142,7 @@ LOCAL_SRC_FILES := \
 	libarsdkctrl/src/arsdkctrl_log.c \
 	libarsdkctrl/src/arsdk_discovery.c \
 	libarsdkctrl/src/arsdk_ctrl.c \
-	libarsdkctrl/src/arsdk_device.c \
 	libarsdkctrl/src/arsdkctrl_backend.c \
-	libarsdkctrl/src/arsdk_ftp_itf.c \
 	libarsdkctrl/src/arsdk_media_itf.c \
 	libarsdkctrl/src/arsdk_updater_itf.c \
 	libarsdkctrl/src/arsdk_blackbox_itf.c \
@@ -155,6 +154,17 @@ LOCAL_SRC_FILES := \
 	libarsdkctrl/src/updater/arsdk_updater_transport.c \
 	libarsdkctrl/src/updater/arsdk_updater_transport_ftp.c \
 	libarsdkctrl/src/updater/arsdk_updater_transport_mux.c
+
+ifeq ($(CONFIG_ALCHEMY_BUILD_LIBMUX_LEGACY_CONFIG),y)
+LOCAL_SRC_FILES += \
+	libarsdkctrl/src/arsdk_ftp_itf_mux_legacy.c \
+	libarsdkctrl/src/arsdk_device_mux_legacy.c
+LOCAL_CFLAGS += -DLIBMUX_LEGACY=1
+else
+LOCAL_SRC_FILES += \
+	libarsdkctrl/src/arsdk_ftp_itf.c \
+	libarsdkctrl/src/arsdk_device.c
+endif
 
 LOCAL_SRC_FILES += \
 	libarsdkctrl/src/net/arsdkctrl_backend_net.c \
@@ -231,12 +241,19 @@ LOCAL_GENERATED_SRC_FILES := gen/arsdk_test_protoc_gen.c
 
 LOCAL_SRC_FILES := \
 	tests/arsdk_test.c \
-	tests/arsdk_test_protoc_dev.c\
-	tests/arsdk_test_protoc_ctrl.c\
-	tests/arsdk_test_protoc.c \
+	tests/env/arsdk_test_env.c \
+	tests/env/arsdk_test_env_dev.c \
+	tests/env/arsdk_test_env_mux_tip.c \
+	tests/env/arsdk_test_env_ctrl.c \
+	tests/arsdk_test_cmd_itf.c \
 	tests/arsdk_test_enc_dec.c
 
-LOCAL_LIBRARIES := libarsdk libpomp avahi-client libcunit
+LOCAL_LIBRARIES := libarsdk \
+		   libarsdkctrl \
+		   libpomp \
+		   avahi-client \
+		   libmux \
+		   libcunit
 
 LOCAL_CUSTOM_MACROS := \
 	arsdkgen-macro:$(LOCAL_PATH)/tools/arsdktestgen.py,$(call local-get-build-dir)/gen

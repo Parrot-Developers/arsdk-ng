@@ -416,80 +416,6 @@ static ssize_t socket_write(struct arsdk_transport_net *self,
 #endif /* !_WIN32 */
 
 /**
- * Reads a variable unsigned integer from data.
- *
- * @param src : Source where read.
- * @param src_len : Source length.
- * @param val[out] : Value read.
- * @param val_len[out] : Length in byte read from the source.
- *
- * @return 0 in case of success, negative errno value in case of error.
- */
-static int read_varuint(const uint8_t *src, size_t src_len,
-		uint32_t *val, size_t *val_len)
-{
-	uint32_t shift = 0;
-	size_t offset = 0;
-	int more = 0;
-
-	if (src_len == 0)
-		return -EINVAL;
-
-	*val = 0;
-	/* Decode value */
-	do {
-		*val |= (((uint32_t)(src[offset] & 0x7f)) << shift);
-		more = src[offset] & 0x80;
-
-		offset++;
-		shift += 7;
-		if ((offset > src_len) ||
-		    (offset > 5) ||
-		    (offset == 5 && src[offset] & 0x0f))
-			return -EPROTO;
-	} while (more);
-
-	*val_len = offset;
-	return 0;
-}
-
-/**
- * Writes a variable unsigned integer in data.
- *
- * @param dst : Destination where write.
- * @param dst_len : Destination length ; should be greater or equal to 5.
- * @param val : Value to write.
- * @param val_len[out] : Length in byte written in the destination.
- *
- * @return 0 in case of success, negative errno value in case of error.
- */
-static int write_varuint(uint8_t *dst, size_t dst_len,
-		uint32_t val, size_t *val_len)
-{
-	uint8_t data[5];
-	size_t off = 0;
-	uint8_t byte = 0;
-	int more = 0;
-
-	if (dst_len < 5)
-		return -EINVAL;
-
-	/* Process value, use logical right shift without sign propagation */
-	do {
-		byte = val & 0x7f;
-		val >>= 7;
-		more = (val != 0);
-		if (more)
-			byte |= 0x80;
-		data[off++] = byte;
-	} while (more);
-
-	memcpy(dst, data, off);
-	*val_len = off;
-	return 0;
-}
-
-/**
  * Decodes protocol v1 header
  *
  * @param headerbuf : Data to read.
@@ -538,7 +464,7 @@ static int decode_header_v1(const uint8_t *headerbuf,
 static int read_proto_v(const uint8_t *src, size_t src_len,
 		uint32_t *proto_v, size_t *proto_v_len)
 {
-	int res = read_varuint(src, src_len, proto_v, proto_v_len);
+	int res = futils_varint_read_u32(src, src_len, proto_v, proto_v_len);
 	if (res < 0)
 		return res;
 
@@ -573,7 +499,7 @@ static int write_proto_v(uint8_t *dst, size_t dst_len,
 		return -EINVAL;
 
 	/* Protocol version with offset */
-	return write_varuint(dst, dst_len,
+	return futils_varint_write_u32(dst, dst_len,
 			proto_v + ARSDK_TRANSPORT_DATA_TYPE_MAX,
 			proto_v_len);
 }
@@ -632,7 +558,7 @@ static int decode_header_v2(const uint8_t *buf, size_t len,
 	data += 2;
 	data_len -= 2;
 
-	res = read_varuint(data, data_len, payload_len, &val_len);
+	res = futils_varint_read_u32(data, data_len, payload_len, &val_len);
 	if (res < 0)
 		return -EPROTO;
 	data += val_len;
@@ -825,7 +751,7 @@ static int encode_header_v2(const struct arsdk_transport_header *header,
 	data_len -= 2;
 
 	/* Payload size */
-	res = write_varuint(data, data_len, payload_len, &val_len);
+	res = futils_varint_write_u32(data, data_len, payload_len, &val_len);
 	if (res < 0)
 		return res;
 	data += val_len;

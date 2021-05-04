@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2019 Parrot Drones SAS
+ * Copyright (c) 2020 Parrot Drones SAS
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -24,47 +24,17 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _ARSDK_MUX_H_
-#define _ARSDK_MUX_H_
+#ifndef _ARSDK_TEST_ENV_CTRL_H_
+#define _ARSDK_TEST_ENV_CTRL_H_
 
-#include <libmux.h>
-#include <libmux-arsdk.h>
-#include <libmux-update.h>
-#include <libmux-blackbox.h>
+/* forward declarations. */
+struct arsdk_test_env_ctrl;
 
-#include "arsdk_transport_mux.h"
+int arsdk_test_env_ctrl_new(struct pomp_loop *loop,
+		enum arsdk_backend_type backend_type,
+		struct arsdk_device_conn_cbs *cbs,
+		struct arsdk_test_env_ctrl **ret_ctrl);
 
-/**
- * json key used by the controller to indicate
- * the minimum protocol version supported
- */
-#define ARSDK_CONN_JSON_KEY_PROTO_V_MIN            "proto_v_min"
-/**
- * json key used by the controller to indicate
- * the maximum protocol version supported
- */
-#define ARSDK_CONN_JSON_KEY_PROTO_V_MAX            "proto_v_max"
-/** json key used by the device to indicate the chosen protocol version. */
-#define ARSDK_CONN_JSON_KEY_PROTO_V                "proto_v"
+int arsdk_test_env_ctrl_destroy(struct arsdk_test_env_ctrl *self);
 
-
-#include <json-c/json.h>
-
-static inline struct json_object *get_json_object(struct json_object *obj,
-		const char *key)
-{
-	struct json_object *res = NULL;
-
-#if defined(JSON_C_MAJOR_VERSION) && defined(JSON_C_MINOR_VERSION) && \
-	((JSON_C_MAJOR_VERSION == 0 && JSON_C_MINOR_VERSION >= 10) || \
-	 (JSON_C_MAJOR_VERSION > 0))
-	if (!json_object_object_get_ex(obj, key, &res))
-		res = NULL;
-#else
-	/* json_object_object_get is deprecated started version 0.10 */
-	res = json_object_object_get(obj, key);
-#endif
-	return res;
-}
-
-#endif /* _ARSDK_MUX_H_ */
+#endif /* !_ARSDK_TEST_ENV_CTRL_H_ */

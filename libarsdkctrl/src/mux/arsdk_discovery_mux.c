@@ -106,6 +106,8 @@ static void discovery_mux_rx_device_added(struct arsdk_discovery_mux *self,
 	info.name = name;
 	info.type = type;
 	info.id = id;
+	info.api = mux_get_remote_version(self->mux) == MUX_PROTOCOL_VERSION ?
+			ARSDK_DEVICE_API_FULL : ARSDK_DEVICE_API_UPDATE_ONLY;
 
 	/* add device if type is supported */
 	if (is_devtype_supported(self, info.type))
@@ -138,6 +140,8 @@ static void discovery_mux_rx_device_removed(struct arsdk_discovery_mux *self,
 	info.name = name;
 	info.type = type;
 	info.id = id;
+	info.api = mux_get_remote_version(self->mux) == MUX_PROTOCOL_VERSION ?
+			ARSDK_DEVICE_API_FULL : ARSDK_DEVICE_API_UPDATE_ONLY;
 
 	/* remove device if type is supported */
 	if (is_devtype_supported(self, info.type))

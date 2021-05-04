@@ -219,7 +219,21 @@ def gen_cmd_desc_h(ctx, out):
 #===============================================================================
 #===============================================================================
 def gen_cmd_desc_c(ctx, out):
-    out.write("#include \"arsdk/arsdk.h\"\n")
+    out.write("#include \"arsdk/arsdk.h\"\n\n")
+
+    out.write("/* Disable compilation warnings*/\n")
+    out.write("#ifdef __clang__\n")
+    out.write("#pragma clang diagnostic push\n")
+    out.write("#pragma clang diagnostic ignored \"-Wunused-const-variable\"\n")
+    out.write("#elif defined(__GNUC__)\n")
+    out.write("#pragma GCC diagnostic push\n")
+    out.write("#if __GNUC__ > 5\n")
+    out.write("#pragma GCC diagnostic ignored \"-Wunused-const-variable\"\n")
+    out.write("#else\n")
+    out.write("#pragma GCC diagnostic ignored \"-Wunused-variable\"\n")
+    out.write("#endif\n")
+    out.write("#endif\n")
+
     out.write("\n")
     for featureId in sorted(ctx.featuresById.keys()):
         featureObj = ctx.featuresById[featureId]
@@ -374,6 +388,17 @@ def gen_cmd_desc_c(ctx, out):
     out.write("\tNULL,\n")
     out.write("};\n\n")
 
+    out.write("#ifdef __clang__\n")
+    out.write("#pragma clang diagnostic pop\n")
+    out.write("#elif defined(__GNUC__)\n")
+    out.write("#pragma GCC diagnostic pop\n")
+    out.write("#endif\n\n")
+
+    out.write("const struct arsdk_cmd_desc * const * const **arsdk_get_cmd_table(void)\n")
+    out.write("{\n")
+    out.write("\treturn g_arsdk_cmd_desc_table;\n")
+    out.write("}\n")
+
 #===============================================================================
 #===============================================================================
 def gen_cmd_dec_h(ctx, out):
@@ -398,6 +423,8 @@ def gen_cmd_dec_h(ctx, out):
                 elif isinstance(argObj.argType, arsdkparser.ArBitfield):
                     out.write(",\n\t\t%s",
                             _get_arg_type_c_name(argObj.argType.btfType))
+                elif argObj.argType == arsdkparser.ArArgType.BINARY:
+                    out.write(",\n\t\tstruct arsdk_binary")
                 else:
                     out.write(",\n\t\t%s", _get_arg_type_c_name(argObj.argType))
                 if argObj.argType != arsdkparser.ArArgType.STRING:
@@ -446,6 +473,8 @@ def gen_cmd_enc_h(ctx, out):
                 elif isinstance(argObj.argType, arsdkparser.ArBitfield):
                     out.write(",\n\t\t%s",
                             _get_arg_type_c_name(argObj.argType.btfType))
+                elif argObj.argType == arsdkparser.ArArgType.BINARY:
+                    out.write(",\n\t\tconst struct arsdk_binary *")
                 else:
                     out.write(",\n\t\t%s", _get_arg_type_c_name(argObj.argType))
 
@@ -492,6 +521,8 @@ def gen_cmd_send_h(ctx, out):
                 elif isinstance(argObj.argType, arsdkparser.ArBitfield):
                     out.write(",\n\t\t%s",
                         _get_arg_type_c_name(argObj.argType.btfType))
+                elif argObj.argType == arsdkparser.ArArgType.BINARY:
+                    out.write(",\n\t\tconst struct arsdk_binary *")
                 else:
                     out.write(",\n\t\t%s", _get_arg_type_c_name(argObj.argType))
                 if argObj.argType != arsdkparser.ArArgType.STRING :

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2019 Parrot Drones SAS
+ * Copyright (c) 2020 Parrot Drones SAS
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -24,47 +24,36 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _ARSDK_MUX_H_
-#define _ARSDK_MUX_H_
+#ifndef _ARSDK_TEST_ENV_MUX_TIP_H_
+#define _ARSDK_TEST_ENV_MUX_TIP_H_
 
-#include <libmux.h>
-#include <libmux-arsdk.h>
-#include <libmux-update.h>
-#include <libmux-blackbox.h>
+#include "libmux.h"
 
-#include "arsdk_transport_mux.h"
+/* forward declaration. */
+struct arsdk_test_env_mux_tip;
 
-/**
- * json key used by the controller to indicate
- * the minimum protocol version supported
- */
-#define ARSDK_CONN_JSON_KEY_PROTO_V_MIN            "proto_v_min"
-/**
- * json key used by the controller to indicate
- * the maximum protocol version supported
- */
-#define ARSDK_CONN_JSON_KEY_PROTO_V_MAX            "proto_v_max"
-/** json key used by the device to indicate the chosen protocol version. */
-#define ARSDK_CONN_JSON_KEY_PROTO_V                "proto_v"
+enum arsdk_test_env_mux_tip_type {
+	ARSDK_TEST_ENV_MUX_TIP_TYPE_CLIENT,
+	ARSDK_TEST_ENV_MUX_TIP_TYPE_SERVER,
+};
 
+struct arsdk_test_env_mux_tip_cbs {
+	void (*on_connect)(struct arsdk_test_env_mux_tip *self, void *userdata);
+	void (*on_disconnect)(struct arsdk_test_env_mux_tip *self, void *userdata);
+	void *userdata;
+};
 
-#include <json-c/json.h>
+int arsdk_test_env_mux_tip_new(struct pomp_loop *loop,
+		enum arsdk_test_env_mux_tip_type type,
+		struct arsdk_test_env_mux_tip_cbs *cbs,
+		struct arsdk_test_env_mux_tip **ret_tip);
 
-static inline struct json_object *get_json_object(struct json_object *obj,
-		const char *key)
-{
-	struct json_object *res = NULL;
+void arsdk_test_env_mux_tip_destroy(struct arsdk_test_env_mux_tip *self);
 
-#if defined(JSON_C_MAJOR_VERSION) && defined(JSON_C_MINOR_VERSION) && \
-	((JSON_C_MAJOR_VERSION == 0 && JSON_C_MINOR_VERSION >= 10) || \
-	 (JSON_C_MAJOR_VERSION > 0))
-	if (!json_object_object_get_ex(obj, key, &res))
-		res = NULL;
-#else
-	/* json_object_object_get is deprecated started version 0.10 */
-	res = json_object_object_get(obj, key);
-#endif
-	return res;
-}
+int arsdk_test_env_mux_tip_start(struct arsdk_test_env_mux_tip *self);
 
-#endif /* _ARSDK_MUX_H_ */
+int arsdk_test_env_mux_tip_stop(struct arsdk_test_env_mux_tip *self);
+
+struct mux_ctx *arsdk_test_env_mux_tip_get_mctx(struct arsdk_test_env_mux_tip *self);
+
+#endif /* !_ARSDK_TEST_ENV_MUX_TIP_H_ */

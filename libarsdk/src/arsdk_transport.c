@@ -445,6 +445,7 @@ void arsdk_transport_log_cmd(
 uint32_t arsdk_transport_get_proto_v(struct arsdk_transport *self)
 {
 	ARSDK_RETURN_VAL_IF_FAILED(self != NULL, -EINVAL, 0);
+
 	if (self->ops->get_proto_v != NULL)
 		return (*self->ops->get_proto_v)(self);
 	else

@@ -30,7 +30,7 @@
 /** minimum protocol version implemented */
 #define ARSDKCTRL_BACKEND_NET_PROTO_MIN ARSDK_PROTOCOL_VERSION_1
 /** maximum protocol version implemented */
-#define ARSDKCTRL_BACKEND_NET_PROTO_MAX ARSDK_PROTOCOL_VERSION_2
+#define ARSDKCTRL_BACKEND_NET_PROTO_MAX ARSDK_PROTOCOL_VERSION_3
 
 /** */
 struct arsdkctrl_backend_net;
@@ -63,16 +63,6 @@ struct arsdkctrl_backend_net_cfg {
 	 * '0' is considered as 'ARSDKCTRL_BACKEND_NET_PROTO_MAX'.
 	 */
 	uint32_t          proto_v_max;
-};
-
-/** */
-struct arsdk_device_net_cfg {
-	const char              *name;
-	enum arsdk_device_type  type;
-	const char              *addr;
-	uint16_t                port;
-	const char              *id;
-	const char              *discovery;
 };
 
 /**

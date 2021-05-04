@@ -37,9 +37,6 @@
 #include "arsdk_ephemeris_itf_priv.h"
 #include <libmux.h>
 
-/* Opening time out of the TCP proxy mux in milliseconds. */
-#define TCP_PROXY_TIMEOUT 20
-
 /**
  */
 const char *arsdk_device_type_to_fld(enum arsdk_device_type dev_type)
@@ -56,8 +53,6 @@ const char *arsdk_device_type_to_fld(enum arsdk_device_type dev_type)
 		{ARSDK_DEVICE_TYPE_SKYCTRL_2, "SkyController_2/"},
 		{ARSDK_DEVICE_TYPE_SKYCTRL_2P, "SkyController_2/"},
 		{ARSDK_DEVICE_TYPE_SKYCTRL_3, "SkyController_3/"},
-		{ARSDK_DEVICE_TYPE_SKYCTRL_UA, "SkyController_UA/"},
-		{ARSDK_DEVICE_TYPE_SKYCTRL_4, "SkyController_4/"},
 		{ARSDK_DEVICE_TYPE_JS, "Jumping_Sumo/"},
 		{ARSDK_DEVICE_TYPE_JS_EVO_LIGHT, "Jumping_Night/"},
 		{ARSDK_DEVICE_TYPE_JS_EVO_RACE, "Jumping_Race/"},
@@ -280,7 +275,6 @@ static void update_info(struct arsdk_device *self,
 	/* Update non string fields */
 	self->info.type = info->type;
 	self->info.port = info->port;
-	self->info.api = info->api;
 }
 
 /**
@@ -1003,9 +997,7 @@ static int resolution(struct arsdk_device_info *dev_info,
 		if (dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_2 ||
 		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_2P ||
 		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_NG ||
-		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_3  ||
-		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_UA ||
-		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_4)
+		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_3)
 			*host = "skycontroller";
 		else
 			*host = "drone";
@@ -1018,94 +1010,25 @@ static int resolution(struct arsdk_device_info *dev_info,
 	}
 }
 
-static void on_proxy_close(struct arsdk_device_tcp_proxy *proxy)
-{
-	if (proxy->is_closed)
-		return;
-
-	proxy->port = 0;
-	proxy->is_closed = 1;
-
-	(*proxy->cbs.close)(proxy, proxy->cbs.userdata);
-}
-
-static void mux_proxy_open_cb(struct mux_ip_proxy *self, uint16_t localport,
-		void *userdata)
-{
-	struct arsdk_device_tcp_proxy *proxy = userdata;
-
-	ARSDK_RETURN_IF_FAILED(proxy != NULL, -EINVAL);
-
-	proxy->port = localport;
-
-	(*proxy->cbs.open)(proxy, localport, proxy->cbs.userdata);
-}
-
-static void mux_proxy_close_cb(struct mux_ip_proxy *self, void *userdata)
-{
-	struct arsdk_device_tcp_proxy *proxy = userdata;
-
-	ARSDK_RETURN_IF_FAILED(proxy != NULL, -EINVAL);
-
-	on_proxy_close(proxy);
-}
-
-static void mux_proxy_resolution_failed_cb(struct mux_ip_proxy *self, int err,
-		void *userdata)
-{
-	struct arsdk_device_tcp_proxy *proxy = userdata;
-
-	ARSDK_LOGW("tcp resolution failed err: %d", err);
-
-	ARSDK_RETURN_IF_FAILED(proxy != NULL, -EINVAL);
-
-	on_proxy_close(proxy);
-}
-
-static void tcp_proxy_open_idle_cb(void *userdata)
-{
-	struct arsdk_device_tcp_proxy *proxy = userdata;
-
-	ARSDK_RETURN_IF_FAILED(proxy != NULL, -EINVAL);
-
-	(*proxy->cbs.open)(proxy, proxy->port, proxy->cbs.userdata);
-}
-
 int arsdk_device_create_tcp_proxy(struct arsdk_device *self,
 		enum arsdk_device_type dev_type,
 		uint16_t port,
-		struct arsdk_device_tcp_proxy_cbs *cbs,
 		struct arsdk_device_tcp_proxy **ret_proxy)
 {
 	int res = 0;
-	struct pomp_loop *loop = NULL;
 	struct mux_ctx *mux = NULL;
 	struct arsdk_device_tcp_proxy *proxy = NULL;
 	const char *res_host = NULL;
 	int tmp_port = port;
-	struct mux_ip_proxy_info mux_info = {
-		.protocol = {
-			.transport = MUX_IP_PROXY_TRANSPORT_TCP,
-		},
-	};
-	struct mux_ip_proxy_cbs mux_cbs = {
-		.open = &mux_proxy_open_cb,
-		.close = &mux_proxy_close_cb,
-		.resolution_failed = &mux_proxy_resolution_failed_cb,
-	};
 
 	ARSDK_RETURN_ERR_IF_FAILED(self != NULL, -EINVAL);
 	ARSDK_RETURN_ERR_IF_FAILED(ret_proxy != NULL, -EINVAL);
-	ARSDK_RETURN_ERR_IF_FAILED(cbs != NULL, -EINVAL);
-	ARSDK_RETURN_ERR_IF_FAILED(cbs->open != NULL, -EINVAL);
-	ARSDK_RETURN_ERR_IF_FAILED(cbs->close != NULL, -EINVAL);
 
 	proxy = calloc(1, sizeof(*proxy));
 	if (proxy == NULL)
 		return -ENOMEM;
 
 	proxy->device = self;
-	proxy->cbs = *cbs;
 
 	if (arsdkctrl_backend_get_type(self->backend) ==
 			ARSDK_BACKEND_TYPE_MUX) {
@@ -1120,33 +1043,16 @@ int arsdk_device_create_tcp_proxy(struct arsdk_device *self,
 	if (mux == NULL) {
 		proxy->port = tmp_port;
 		proxy->addr = strdup(res_host);
-
-		loop = arsdk_ctrl_get_loop(self->backend->ctrl);
-		if (loop == NULL) {
-			ARSDK_LOGE("arsdk_ctrl_get_loop failed");
-			res = -ENODEV;
-			goto error;
-		}
-
-		res = pomp_loop_idle_add(loop, &tcp_proxy_open_idle_cb, proxy);
-		if (res < 0) {
-			ARSDK_LOG_ERRNO("pomp_loop_idle_add", -res);
-			goto error;
-		}
 	} else {
-		mux_info.remote_host = res_host;
-		mux_info.remote_port = tmp_port;
-
-		mux_cbs.userdata = proxy;
-
 		/* Allocate mux channel */
-		res = mux_ip_proxy_new(mux, &mux_info, &mux_cbs,
-				TCP_PROXY_TIMEOUT, &proxy->mux_tcp_proxy);
+		res = mux_tcp_proxy_new(mux, res_host, tmp_port, 0,
+				&proxy->mux_tcp_proxy);
 		if (res < 0) {
-			ARSDK_LOG_ERRNO("mux_ip_proxy_new", -res);
+			ARSDK_LOG_ERRNO("mux_channel_open_tcp", -res);
 			goto error;
 		}
 		proxy->addr = strdup("127.0.0.1");
+		proxy->port = mux_tcp_proxy_get_port(proxy->mux_tcp_proxy);
 	}
 
 	*ret_proxy = proxy;
@@ -1158,13 +1064,14 @@ error:
 
 int arsdk_device_destroy_tcp_proxy(struct arsdk_device_tcp_proxy *proxy)
 {
+	int res = 0;
+
 	ARSDK_RETURN_ERR_IF_FAILED(proxy != NULL, -EINVAL);
 	ARSDK_RETURN_ERR_IF_FAILED(proxy->device != NULL, -EINVAL);
 
-	if (proxy->mux_tcp_proxy != NULL)
-		mux_ip_proxy_destroy(proxy->mux_tcp_proxy);
-	else
-		on_proxy_close(proxy);
+	res = mux_tcp_proxy_destroy(proxy->mux_tcp_proxy);
+	if (res < 0)
+		ARSDK_LOG_ERRNO("mux_channel_close", -res);
 
 	free(proxy->addr);
 	free(proxy);

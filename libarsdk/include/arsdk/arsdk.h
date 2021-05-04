@@ -113,6 +113,38 @@ struct arsdk_peer_info;
  */
 #define ARSDK_PROTOCOL_VERSION_2 2
 
+/**
+ * Packet cutting version.
+ *
+ * Transport Frame:
+ *     [ varuint ][ 1    ][ 1  ][ 2   ][ varuint ][ p_len   ]
+ *     [ version ][ type ][ id ][ seq ][ p_len   ][ payload ]
+ *
+ *     varuint: Unsigned 32 bits integer encoded with variable length.
+ *              For each byte, the most significant bit is a flag set
+ *              to indicate that an other byte follows and the 7 others bits
+ *              are value data.
+ *              Length in range [1;5] bytes.
+ *
+ *     version: Protocol version offested of 'type' maximum value (10) to
+ *              differentiate from protocol v1.
+ *              Encoded as 'varuint'.
+ *              Is always equal to '13' on 1 byte for this version.
+ *     type: Data type value in range [0;10[.
+ *           Unsigned integer encoded on 1 byte.
+ *     id : Buffer identifier.
+ *          Unsigned integer encoded on 1 byte.
+ *     seq : Packet sequence number.
+ *           Unsigned integer encoded on 2 bytes.
+ *     p_len : Payload length
+ *             Encoded as 'varuint'.
+ *     payload: Payload data of length of 'p_len'.
+ *
+ * Command Interface:
+ *     Uses cmd_itf3.
+ */
+#define ARSDK_PROTOCOL_VERSION_3 3
+
 #include "arsdk_desc.h"
 #include "arsdk_cmd_itf.h"
 
@@ -133,6 +165,9 @@ struct arsdk_peer_info;
 #include "arsdk_cmd_dec.h"
 #include "arsdk_cmd_enc.h"
 #include "arsdk_cmd_send.h"
+
+ARSDK_API
+const struct arsdk_cmd_desc * const * const **arsdk_get_cmd_table(void);
 
 #ifdef __cplusplus
 }

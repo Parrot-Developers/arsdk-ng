@@ -61,7 +61,7 @@ static void raw_cb(struct pomp_ctx *ctx, struct pomp_conn *conn,
 
 }
 
-static int get_ip_addr(struct in_addr *addr, const char *interface_name)
+int get_ip_addr(struct in_addr *addr, const char *interface_name)
 {
 #if defined(__linux__) && !defined(ANDROID)
 	int ret = -1;
