@@ -219,6 +219,7 @@ int arsdk_updater_transport_mux_destroy(
 
 	arsdk_updater_transport_mux_stop(tsprt);
 
+	mux_unref(tsprt->mux);
 	free(tsprt);
 	return 0;
 }

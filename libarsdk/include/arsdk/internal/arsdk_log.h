@@ -49,6 +49,9 @@
 /** Log with va_list */
 #define ARSDK_LOG_PRI_VA(_prio, _fmt, _a)   ULOG_PRI_VA(_prio, _fmt, _a)
 
+/** Log as NOTICE an event */
+#define ARSDK_LOG_EVT(_type, _fmt, ...) ULOG_EVT(_type, _fmt, ##__VA_ARGS__)
+
 #else /* !BUILD_LIBULOG */
 
 #define ARSDK_STRINGIFY(x) #x
@@ -72,6 +75,11 @@
 /** Log with va_list */
 #define ARSDK_LOG_PRI_VA(_prio, _fmt, _a) vfprintf(stderr,\
 		ARSDK_STRINGIFY(ULOG_TAG) "\t"_fmt "\n", _a)
+
+/** Log as NOTICE an event */
+#define ARSDK_LOG_EVT(_type, _fmt, ...) fprintf(stderr,\
+		ARSDK_STRINGIFY(ULOG_TAG) "\t[EVT:%s]"_fmt "\n",\
+		_type, ##__VA_ARGS__)
 
 #endif /* !BUILD_LIBULOG */
 

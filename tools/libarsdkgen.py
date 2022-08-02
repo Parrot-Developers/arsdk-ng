@@ -512,7 +512,7 @@ def gen_cmd_send_h(ctx, out):
                     _to_c_name(featureObj.name),
                     msgName)
             out.write("\t\tstruct arsdk_cmd_itf *itf,\n")
-            out.write("\t\tarsdk_cmd_itf_send_status_cb_t send_status,\n")
+            out.write("\t\tarsdk_cmd_itf_cmd_send_status_cb_t send_status,\n")
             out.write("\t\tvoid *userdata")
             for argObj in msgObj.args:
                 if isinstance(argObj.argType, arsdkparser.ArEnum):

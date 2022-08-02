@@ -32,7 +32,7 @@
 /** Link quality analysis frequency */
 #define LINK_QUALITY_TIME_MS 5000
 /** Command pack maximum size */
-#define ARSDK_PACK_MAX_SIZE 1400
+#define ARSDK_PACK_MAX_SIZE 1000
 
 /**
  * Formats a variable name to be used in a macro.
@@ -116,11 +116,11 @@
 /** Queue entry */
 struct entry {
 	/** Command to send */
-	struct arsdk_cmd                cmd;
+	struct arsdk_cmd                        cmd;
 	/** Callback to notify the command sending status. */
-	arsdk_cmd_itf_send_status_cb_t  send_status;
+	arsdk_cmd_itf_cmd_send_status_cb_t      cmd_send_status;
 	/** User data given in callbacks */
-	void                            *userdata;
+	void                                    *userdata;
 };
 
 /** Sending Queue */
@@ -235,12 +235,12 @@ static void cmd_log(struct arsdk_cmd_itf3 *self,
  */
 static void entry_init(struct entry *entry,
 		const struct arsdk_cmd *cmd,
-		arsdk_cmd_itf_send_status_cb_t send_status,
+		arsdk_cmd_itf_cmd_send_status_cb_t cmd_send_status,
 		void *userdata)
 {
 	memset(entry, 0, sizeof(*entry));
 	arsdk_cmd_copy(&entry->cmd, cmd);
-	entry->send_status = send_status;
+	entry->cmd_send_status = cmd_send_status;
 	entry->userdata = userdata;
 }
 
@@ -253,15 +253,68 @@ static void entry_clear(struct entry *entry)
 	memset(entry, 0, sizeof(*entry));
 }
 
+static enum arsdk_cmd_buffer_type data_type_to_buffer_type(
+		enum arsdk_transport_data_type val)
+{
+	switch (val) {
+	case ARSDK_TRANSPORT_DATA_TYPE_NOACK:
+		return ARSDK_CMD_BUFFER_TYPE_NON_ACK;
+	case ARSDK_TRANSPORT_DATA_TYPE_LOWLATENCY:
+		return ARSDK_CMD_BUFFER_TYPE_HIGH_PRIO;
+	case ARSDK_TRANSPORT_DATA_TYPE_WITHACK:
+		return ARSDK_CMD_BUFFER_TYPE_ACK;
+	case ARSDK_TRANSPORT_DATA_TYPE_ACK:
+	case ARSDK_TRANSPORT_DATA_TYPE_UNKNOWN:
+	default:
+		return ARSDK_CMD_BUFFER_TYPE_INVALID;
+	}
+
+	return ARSDK_CMD_BUFFER_TYPE_INVALID;
+}
+
 /**
  */
-static void entry_notify(struct entry *entry, struct arsdk_cmd_itf3 *self,
-		enum arsdk_cmd_itf_send_status status, int done)
+static void entry_send_notify(struct entry *entry, struct arsdk_cmd_itf3 *self,
+		enum arsdk_transport_data_type type,
+		enum arsdk_cmd_itf_cmd_send_status send_status,
+		uint16_t seq, int done)
 {
-	/* Notify callback */
-	if (entry->send_status != NULL) {
-		(*entry->send_status)(self->itf, &entry->cmd, status, done,
+	/* Notify cmd callback */
+	if (entry->cmd_send_status != NULL) {
+		(*entry->cmd_send_status)(self->itf, &entry->cmd,
+				data_type_to_buffer_type(type),
+				send_status, seq, done,
 				entry->userdata);
+	}
+}
+
+/**
+ */
+static void pack_send_notify(struct arsdk_cmd_itf3 *self,
+		uint16_t seq, enum arsdk_transport_data_type type, size_t len,
+		enum arsdk_cmd_itf_pack_send_status send_status,
+		uint32_t sent_count)
+{
+	/* Notify pack callback */
+	if (self->itf_cbs.pack_send_status != NULL) {
+		(*self->itf_cbs.pack_send_status)(self->itf, seq,
+				data_type_to_buffer_type(type), len,
+				send_status, sent_count,
+				self->itf_cbs.userdata);
+	}
+}
+
+/**
+ */
+static void pack_recv_notify(struct arsdk_cmd_itf3 *self,
+		uint16_t seq, enum arsdk_transport_data_type type, size_t len,
+		enum arsdk_cmd_itf_pack_recv_status recv_status)
+{
+	/* Notify pack callback */
+	if (self->itf_cbs.pack_recv_status != NULL) {
+		(*self->itf_cbs.pack_recv_status)(self->itf, seq,
+				data_type_to_buffer_type(type), len,
+				recv_status, self->itf_cbs.userdata);
 	}
 }
 
@@ -311,11 +364,21 @@ static void queue_stop(struct queue *queue, struct arsdk_cmd_itf3 *itf)
 	uint32_t i = 0, pos = 0;
 	struct entry *entry = NULL;
 
+	/* Notify pack canceled */
+	if (queue->pack.cmd_count != 0) {
+		size_t len;
+		pomp_buffer_get_cdata(queue->pack.buf, NULL, &len, NULL);
+
+		pack_send_notify(itf, queue->pack.seq, queue->info.type, len,
+				ARSDK_CMD_ITF_PACK_SEND_STATUS_CANCELED, 0);
+	}
+
 	/* Cancel all entries of queue */
 	pos = queue->head;
 	for (i = 0; i < queue->count; i++) {
 		entry = &queue->entries[pos];
-		entry_notify(entry, itf, ARSDK_CMD_ITF_SEND_STATUS_CANCELED, 1);
+		entry_send_notify(entry, itf, queue->info.type,
+				ARSDK_CMD_ITF_CMD_SEND_STATUS_CANCELED, 0, 1);
 		entry_clear(entry);
 
 		/* Continue in circular buffer */
@@ -343,7 +406,7 @@ static int queue_destroy(struct queue *queue, struct arsdk_cmd_itf3 *itf)
 static int queue_add(struct queue *queue,
 		struct arsdk_cmd_itf3 *itf,
 		const struct arsdk_cmd *cmd,
-		arsdk_cmd_itf_send_status_cb_t send_status,
+		arsdk_cmd_itf_cmd_send_status_cb_t cmd_send_status,
 		void *userdata)
 {
 	uint32_t newdepth = 0;
@@ -386,7 +449,7 @@ static int queue_add(struct queue *queue,
 
 	/* Add in queue */
 	entry = &queue->entries[queue->tail];
-	entry_init(entry, cmd, send_status, userdata);
+	entry_init(entry, cmd, cmd_send_status, userdata);
 	queue->tail++;
 	if (queue->tail >= queue->depth)
 		queue->tail = 0;
@@ -410,9 +473,10 @@ static void queue_pop(struct queue *queue)
 /**
  * Packs as much as possible the pending commands in only one payload.
  *
- * @param queue: queue of commands to send.
+ * @param self : command interface.
+ * @param queue : queue of commands to send.
  */
-static void queue_pack_cmds(struct queue *queue)
+static void queue_pack_cmds(struct arsdk_cmd_itf3 *self, struct queue *queue)
 {
 	struct entry *entry = NULL;
 	size_t pack_len = 0;
@@ -420,6 +484,7 @@ static void queue_pack_cmds(struct queue *queue)
 	queue_for_each_entry(queue, entry) {
 		const uint8_t *cmd_data;
 		size_t cmd_len;
+		int done;
 
 		pomp_buffer_get_cdata(entry->cmd.buf, (const void **)&cmd_data,
 				&cmd_len, NULL);
@@ -468,6 +533,20 @@ static void queue_pack_cmds(struct queue *queue)
 		/* Append command payload */
 		pomp_buffer_append_data(queue->pack.buf, cmd_data, cmd_len);
 		queue->pack.cmd_count++;
+
+		/* Notify packed command */
+		enum arsdk_cmd_itf_cmd_send_status status =
+				queue->pack.remaining_len > 0 ?
+				ARSDK_CMD_ITF_CMD_SEND_STATUS_PARTIALLY_PACKED :
+				ARSDK_CMD_ITF_CMD_SEND_STATUS_PACKED;
+		done = (queue->info.type == ARSDK_TRANSPORT_DATA_TYPE_NOACK &&
+			status == ARSDK_CMD_ITF_CMD_SEND_STATUS_PACKED);
+		entry_send_notify(entry,
+				  self,
+				  queue->info.type,
+				  status,
+				  queue->seq,
+				  done);
 
 		/* Leave the loop if there is remaining data. */
 		if (queue->pack.remaining_len > 0)
@@ -539,7 +618,6 @@ static void check_tx_queue(struct arsdk_cmd_itf3 *self,
 	uint64_t diff_us = 0;
 	int diff_ms = 0;
 	int remaining_ms = 0;
-	struct entry *entry = NULL;
 	struct arsdk_transport_header header;
 	struct arsdk_transport_payload payload;
 	size_t len = 0;
@@ -584,7 +662,7 @@ again:
 	   pack new commands to send. */
 	if (queue->pack.cmd_count == 0) {
 		queue->seq++;
-		queue_pack_cmds(queue);
+		queue_pack_cmds(self, queue);
 	}
 
 	/* Determine pack buffer length */
@@ -602,20 +680,28 @@ again:
 	res = arsdk_transport_send_data(self->transport, &header, &payload,
 			NULL, 0);
 	arsdk_transport_payload_clear(&payload);
-	if (res < 0)
+	if (res < 0) {
+		ARSDK_LOGI("arsdk_transport_send_data err: %d seq%" PRIu16
+			   "queue: %" PRIu8, -res, queue->seq, queue->info.id);
 		return;
-
-	/* Notify each command completely sent by the pack */
-	queue_for_each_packed_entry_sent(queue, entry) {
-		entry_notify(entry, self, ARSDK_CMD_ITF_SEND_STATUS_SENT,
-				queue->info.type !=
-				ARSDK_TRANSPORT_DATA_TYPE_WITHACK);
 	}
+
+	/* Notify pack sent */
+	pack_send_notify(self, header.seq, queue->info.type, len,
+			ARSDK_CMD_ITF_PACK_SEND_STATUS_SENT,
+			queue->pack.sent_count + 1);
+	if (queue->pack.sent_count == 100) {
+		ARSDK_LOG_EVT("ARSDK",
+			      "event='too_many_retries',max_pack_size=%d,current_pack_size=%zu",
+			      ARSDK_PACK_MAX_SIZE, len);
+	}
+
 	if (queue->info.type == ARSDK_TRANSPORT_DATA_TYPE_WITHACK) {
 		queue->pack.seq = header.seq;
 		queue->pack.waiting_ack = 1;
 		queue->pack.sent_ts = *tsnow;
 		queue->pack.sent_count++;
+
 		/* update ack timeout */
 		if (queue->info.ack_timeout_ms > 0) {
 			diff_ms = queue->info.ack_timeout_ms;
@@ -704,6 +790,12 @@ static void recv_ack(struct arsdk_cmd_itf3 *self,
 					queue->last_pack.ack_count,
 					queue->last_pack.sent_count);
 
+			/* Notify pack ack received */
+			pack_send_notify(self, seq, queue->info.type,
+				payload->len,
+				ARSDK_CMD_ITF_PACK_SEND_STATUS_ACK_RECEIVED,
+				queue->last_pack.ack_count);
+
 			if (queue->last_pack.ack_count >
 					queue->last_pack.sent_count) {
 				ARSDK_LOGE("ACK: id(%u) seq(%u) "
@@ -717,6 +809,12 @@ static void recv_ack(struct arsdk_cmd_itf3 *self,
 		} else if (seq != queue->seq) {
 			ARSDK_LOGE("ACK: Bad seq for id %u (%d/%d)",
 					id, seq, queue->seq);
+
+			/* Notify pack ack received */
+			pack_send_notify(self, seq, queue->info.type,
+				payload->len,
+				ARSDK_CMD_ITF_PACK_SEND_STATUS_ACK_RECEIVED,
+				0);
 			return;
 		}
 
@@ -731,15 +829,20 @@ static void recv_ack(struct arsdk_cmd_itf3 *self,
 		}
 
 		self->lnqlt.ack_count++;
+
+		/* Notify pack ack received */
+		pack_send_notify(self, seq, queue->info.type, payload->len,
+			ARSDK_CMD_ITF_PACK_SEND_STATUS_ACK_RECEIVED, 1);
+
 		/* notify and pop each command completely send of the pack */
 		uint32_t cmd_count = queue->pack.remaining_len == 0 ?
 						queue->pack.cmd_count :
 						queue->pack.cmd_count - 1;
 		for (entry_i = 0; entry_i < cmd_count; entry_i++) {
 			entry = &queue->entries[queue->head];
-			entry_notify(entry, self,
-				     ARSDK_CMD_ITF_SEND_STATUS_ACK_RECEIVED,
-				     1);
+			entry_send_notify(entry, self, queue->info.type,
+				ARSDK_CMD_ITF_CMD_SEND_STATUS_ACK_RECEIVED,
+				seq, 1);
 			queue_pop(queue);
 		}
 
@@ -780,6 +883,11 @@ static int send_ack(struct arsdk_cmd_itf3 *self, uint8_t id, uint16_t seq)
 	res = arsdk_transport_send_data(self->transport, &header, &payload,
 			NULL, 0);
 	arsdk_transport_payload_clear(&payload);
+
+	/* Notify pack acknowledge sent, force type to data with ack since
+	 * we will never send an acknowledge for non-ack data */
+	pack_recv_notify(self, seq, ARSDK_TRANSPORT_DATA_TYPE_WITHACK,
+			sizeof(seq), ARSDK_CMD_ITF_PACK_RECV_STATUS_ACK_SENT);
 	return res;
 }
 
@@ -856,7 +964,7 @@ int arsdk_cmd_itf3_stop(struct arsdk_cmd_itf3 *self)
  */
 int arsdk_cmd_itf3_send(struct arsdk_cmd_itf3 *self,
 		const struct arsdk_cmd *cmd,
-		arsdk_cmd_itf_send_status_cb_t send_status,
+		arsdk_cmd_itf_cmd_send_status_cb_t send_status,
 		void *userdata)
 {
 	int res = 0;
@@ -871,7 +979,7 @@ int arsdk_cmd_itf3_send(struct arsdk_cmd_itf3 *self,
 
 	/* Use default callback if none given */
 	if (send_status == NULL) {
-		send_status = self->itf_cbs.send_status;
+		send_status = self->itf_cbs.cmd_send_status;
 		userdata = self->itf_cbs.userdata;
 	}
 
@@ -899,7 +1007,14 @@ static int should_process_data(struct arsdk_cmd_itf3 *self, uint8_t id,
 	    (diff < -10) /* loop */) {
 		self->recv_seq[id] = seq;
 		return 1;
+	} else if (diff == 0) {
+		ARSDK_LOGD("Duplicated seq num for queue: %" PRIu8
+			   " ; recv: %" PRIu16 " prev: %" PRIu16,
+				id, seq, prev);
+		return 0;
 	} else {
+		ARSDK_LOGW("Bad seq num for queue: %" PRIu8 " ; recv: %" PRIu16
+			   " prev: %" PRIu16, id, seq, prev);
 		return 0;
 	}
 }
@@ -1017,22 +1132,7 @@ static int unpack_cmds(struct arsdk_cmd_itf3 *self,
 		arsdk_cmd_init_with_buf(&cmd, buf);
 
 		/* Set arsdk_cmd buffer type from transport data type */
-		switch (data_type) {
-		case ARSDK_TRANSPORT_DATA_TYPE_NOACK:
-			cmd.buffer_type = ARSDK_CMD_BUFFER_TYPE_NON_ACK;
-			break;
-		case ARSDK_TRANSPORT_DATA_TYPE_LOWLATENCY:
-			cmd.buffer_type = ARSDK_CMD_BUFFER_TYPE_HIGH_PRIO;
-			break;
-		case ARSDK_TRANSPORT_DATA_TYPE_WITHACK:
-			cmd.buffer_type = ARSDK_CMD_BUFFER_TYPE_ACK;
-			break;
-		case ARSDK_TRANSPORT_DATA_TYPE_ACK:
-		case ARSDK_TRANSPORT_DATA_TYPE_UNKNOWN:
-		default:
-			cmd.buffer_type = ARSDK_CMD_BUFFER_TYPE_INVALID;
-			break;
-		}
+		cmd.buffer_type = data_type_to_buffer_type(data_type);
 
 		/* Try to decode header of command, Notify reception */
 		res = arsdk_cmd_dec_header(&cmd);
@@ -1059,8 +1159,6 @@ int arsdk_cmd_itf3_recv_data(struct arsdk_cmd_itf3 *self,
 		const struct arsdk_transport_header *header,
 		const struct arsdk_transport_payload *payload)
 {
-	int res = 0;
-
 	ARSDK_RETURN_ERR_IF_FAILED(header != NULL, -EINVAL);
 	ARSDK_RETURN_ERR_IF_FAILED(payload != NULL, -EINVAL);
 	ARSDK_RETURN_ERR_IF_FAILED(self != NULL, -EINVAL);
@@ -1084,24 +1182,30 @@ int arsdk_cmd_itf3_recv_data(struct arsdk_cmd_itf3 *self,
 	if (header->type == ARSDK_TRANSPORT_DATA_TYPE_WITHACK)
 		send_ack(self, header->id, header->seq);
 
-	/* If the sequence number was already handled, stop processing here */
-	if (!should_process_data(self, header->id, header->seq))
-		return 0;
-
-	/* Unpack commands from the payload */
+	size_t len;
+	const void *data = NULL;
 	if (payload->cdata != NULL) {
-		res = unpack_cmds(self, header->type,
-				payload->cdata, payload->len);
+		len = payload->len;
+		data = payload->cdata;
 	} else {
 		/* Frame has no raw data, but buffer */
-		size_t len;
-		const void *data = NULL;
-
 		pomp_buffer_get_cdata(payload->buf, &data, &len, NULL);
-		res = unpack_cmds(self, header->type, data, len);
 	}
 
-	return res;
+	/* If the sequence number was already handled, stop processing here */
+	if (!should_process_data(self, header->id, header->seq)) {
+		/* Notify pack drop */
+		pack_recv_notify(self, header->seq, header->type, len,
+				ARSDK_CMD_ITF_PACK_RECV_STATUS_IGNORED);
+		return 0;
+	}
+
+	/* Notify pack received */
+	pack_recv_notify(self, header->seq, header->type, len,
+			ARSDK_CMD_ITF_PACK_RECV_STATUS_PROCESSED);
+
+	/* Unpack commands from the payload */
+	return unpack_cmds(self, header->type, data, len);
 }
 
 /**

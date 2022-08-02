@@ -33,17 +33,56 @@
 
 /**
  */
-const char *arsdk_cmd_itf_send_status_str(enum arsdk_cmd_itf_send_status val)
+const char *arsdk_cmd_itf_cmd_send_status_str(
+		enum arsdk_cmd_itf_cmd_send_status val)
 {
 	switch (val) {
-	case ARSDK_CMD_ITF_SEND_STATUS_SENT:
-		return "SENT";
-	case ARSDK_CMD_ITF_SEND_STATUS_ACK_RECEIVED:
+	case ARSDK_CMD_ITF_CMD_SEND_STATUS_PARTIALLY_PACKED:
+		return "PARTIALLY_PACKED";
+	case ARSDK_CMD_ITF_CMD_SEND_STATUS_PACKED:
+		return "PACKED";
+	case ARSDK_CMD_ITF_CMD_SEND_STATUS_ACK_RECEIVED:
 		return "ACK_RECEIVED";
-	case ARSDK_CMD_ITF_SEND_STATUS_TIMEOUT:
+	case ARSDK_CMD_ITF_CMD_SEND_STATUS_TIMEOUT:
 		return "TIMEOUT";
-	case ARSDK_CMD_ITF_SEND_STATUS_CANCELED:
+	case ARSDK_CMD_ITF_CMD_SEND_STATUS_CANCELED:
 		return "CANCELED";
+	default:
+		return "UNKNOWN";
+	}
+}
+
+/**
+ */
+const char *arsdk_cmd_itf_pack_send_status_str(
+		enum arsdk_cmd_itf_pack_send_status val)
+{
+	switch (val) {
+	case ARSDK_CMD_ITF_PACK_SEND_STATUS_SENT:
+		return "SENT";
+	case ARSDK_CMD_ITF_PACK_SEND_STATUS_ACK_RECEIVED:
+		return "ACK_RECEIVED";
+	case ARSDK_CMD_ITF_PACK_SEND_STATUS_TIMEOUT:
+		return "TIMEOUT";
+	case ARSDK_CMD_ITF_PACK_SEND_STATUS_CANCELED:
+		return "CANCELED";
+	default:
+		return "UNKNOWN";
+	}
+}
+
+/**
+ */
+const char *arsdk_cmd_itf_pack_recv_status_str(
+		enum arsdk_cmd_itf_pack_recv_status val)
+{
+	switch (val) {
+	case ARSDK_CMD_ITF_PACK_RECV_STATUS_ACK_SENT:
+		return "ACK_SENT";
+	case ARSDK_CMD_ITF_PACK_RECV_STATUS_PROCESSED:
+		return "PROCESSED";
+	case ARSDK_CMD_ITF_PACK_RECV_STATUS_IGNORED:
+		return "IGNORED";
 	default:
 		return "UNKNOWN";
 	}
@@ -210,7 +249,7 @@ int arsdk_cmd_itf_stop(struct arsdk_cmd_itf *self)
  */
 int arsdk_cmd_itf_send(struct arsdk_cmd_itf *self,
 		const struct arsdk_cmd *cmd,
-		arsdk_cmd_itf_send_status_cb_t send_status,
+		arsdk_cmd_itf_cmd_send_status_cb_t send_status,
 		void *userdata)
 {
 	int res;

@@ -152,6 +152,7 @@ int main(int argc, char *argv[])
 	CU_initialize_registry();
 	CU_register_suites(g_suites_cmd_itf);
 	CU_register_suites(g_suites_enc_dec);
+	CU_register_suites(g_suites_protoc);
 
 	if (argc >= 2 && (strcmp(argv[1], "-h") == 0
 			|| strcmp(argv[1], "--help") == 0)) {

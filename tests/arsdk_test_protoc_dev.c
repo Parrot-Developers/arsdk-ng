@@ -36,7 +36,7 @@ struct test_dev {
 	struct pomp_loop             *loop;
 	struct arsdk_mngr            *mngr;
 	struct arsdk_backend_net     *backend_net;
-	struct arsdk_publisher_avahi *publisher_avahi;
+	struct arsdk_publisher_net   *publisher_net;
 	struct arsdk_peer            *peer;
 	struct arsdk_cmd_itf         *cmd_itf;
 };
@@ -46,7 +46,7 @@ static struct test_dev s_dev = {
 	.loop = NULL,
 	.mngr = NULL,
 	.backend_net = NULL,
-	.publisher_avahi = NULL,
+	.publisher_net = NULL,
 	.peer = NULL,
 	.cmd_itf = NULL,
 };
@@ -55,7 +55,9 @@ static struct test_dev s_dev = {
  */
 static void dev_send_status(struct arsdk_cmd_itf *itf,
 		const struct arsdk_cmd *cmd,
-		enum arsdk_cmd_itf_send_status status,
+		enum arsdk_cmd_buffer_type type,
+		enum arsdk_cmd_itf_cmd_send_status status,
+		uint16_t seq,
 		int done,
 		void *userdata)
 {
@@ -85,11 +87,13 @@ static void dev_connected(struct arsdk_peer *peer,
 	struct test_dev *dev = userdata;
 	struct arsdk_cmd_itf_cbs cmd_cbs;
 
+	fprintf(stderr, "device connected\n");
+
 	/* Create command interface object */
 	memset(&cmd_cbs, 0, sizeof(cmd_cbs));
 	cmd_cbs.userdata = dev;
 	cmd_cbs.recv_cmd = &dev_recv_cmd;
-	cmd_cbs.send_status = &dev_send_status;
+	cmd_cbs.cmd_send_status = &dev_send_status;
 	res = arsdk_peer_create_cmd_itf(peer, &cmd_cbs, &dev->cmd_itf);
 	CU_ASSERT_EQUAL(res, 0);
 }
@@ -101,6 +105,8 @@ static void dev_disconnected(struct arsdk_peer *peer,
 		void *userdata)
 {
 	struct test_dev *dev = userdata;
+
+	fprintf(stderr, "device disconnected\n");
 
 	dev->cmd_itf = NULL;
 	dev->peer = NULL;
@@ -176,7 +182,7 @@ static void backend_dev_create(struct test_dev *dev)
 {
 	int res = 0;
 	struct arsdk_backend_net_cfg backend_net_cfg;
-	struct arsdk_publisher_avahi_cfg publisher_avahi_cfg;
+	struct arsdk_publisher_net_cfg publisher_net_cfg;
 	struct arsdk_publisher_cfg publisher_cfg = {
 		.name = DEVICE_NAME,
 		.type = ARSDK_DEVICE_TYPE_BEBOP_2,
@@ -196,17 +202,17 @@ static void backend_dev_create(struct test_dev *dev)
 			&listen_cbs, net_listen_port);
 	CU_ASSERT_EQUAL(res, 0);
 
-	/* start avahi publisher */
-	memset(&publisher_avahi_cfg, 0, sizeof(publisher_avahi_cfg));
-	publisher_avahi_cfg.base = publisher_cfg;
-	publisher_avahi_cfg.port = net_listen_port;
+	/* start net publisher */
+	memset(&publisher_net_cfg, 0, sizeof(publisher_net_cfg));
+	publisher_net_cfg.base = publisher_cfg;
+	publisher_net_cfg.port = net_listen_port;
 
-	res = arsdk_publisher_avahi_new(dev->backend_net, dev->loop,
-			&dev->publisher_avahi);
+	res = arsdk_publisher_net_new(dev->backend_net, dev->loop, NULL,
+			&dev->publisher_net);
 	CU_ASSERT_EQUAL(res, 0);
 
-	res = arsdk_publisher_avahi_start(dev->publisher_avahi,
-			&publisher_avahi_cfg);
+	res = arsdk_publisher_net_start(dev->publisher_net,
+			&publisher_net_cfg);
 	CU_ASSERT_EQUAL(res, 0);
 }
 
@@ -216,12 +222,12 @@ static void backend_dev_destroy(struct test_dev *dev)
 {
 	int res = 0;
 
-	res = arsdk_publisher_avahi_stop(dev->publisher_avahi);
+	res = arsdk_publisher_net_stop(dev->publisher_net);
 	CU_ASSERT_EQUAL(res, 0);
 
-	res = arsdk_publisher_avahi_destroy(dev->publisher_avahi);
+	res = arsdk_publisher_net_destroy(dev->publisher_net);
 	CU_ASSERT_EQUAL(res, 0);
-	dev->publisher_avahi = NULL;
+	dev->publisher_net = NULL;
 
 	if (dev->peer != NULL) {
 		res = arsdk_peer_disconnect(dev->peer);

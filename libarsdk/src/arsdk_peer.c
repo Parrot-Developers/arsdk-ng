@@ -46,6 +46,7 @@ static void recv_data(struct arsdk_transport *transport,
 		const struct arsdk_transport_payload *payload,
 		void *userdata)
 {
+	int res;
 	struct arsdk_peer *self = userdata;
 
 	switch (header->id) {
@@ -54,12 +55,19 @@ static void recv_data(struct arsdk_transport *transport,
 	case ARSDK_TRANSPORT_ID_C2D_CMD_HIGHPRIO:
 	case ARSDK_TRANSPORT_ID_C2D_CMD_ACK:
 	case ARSDK_TRANSPORT_ID_C2D_CMD_ACK_BLE:
-		if (self->cmd_itf != NULL)
-			arsdk_cmd_itf_recv_data(self->cmd_itf, header, payload);
+		if (self->cmd_itf == NULL) {
+			ARSDK_LOGW("Frame lost id=%d seq=%d", header->id,
+					header->seq);
+			break;
+		}
+
+		res = arsdk_cmd_itf_recv_data(self->cmd_itf, header, payload);
+		if (res < 0)
+			ARSDK_LOG_ERRNO("arsdk_cmd_itf_recv_data", -res);
 		break;
 
 	default:
-		ARSDK_LOGW("Frame lost id=%d", header->id);
+		ARSDK_LOGW("Frame lost id=%d seq=%d", header->id, header->seq);
 		break;
 	}
 }

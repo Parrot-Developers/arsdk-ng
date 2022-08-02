@@ -34,9 +34,9 @@
 /** */
 struct test_ctrl {
 	struct pomp_loop             *loop;
-	struct arsdk_mngr            *mngr;
-	struct arsdk_backend_net     *backend_net;
-	struct arsdk_discovery_avahi *discovery_avahi;
+	struct arsdk_ctrl            *ctrl;
+	struct arsdkctrl_backend_net *backend_net;
+	struct arsdk_discovery_net   *discovery_net;
 	struct arsdk_device          *device;
 	struct arsdk_cmd_itf         *cmd_itf;
 };
@@ -44,9 +44,9 @@ struct test_ctrl {
 /** */
 static struct test_ctrl s_ctrl = {
 	.loop = NULL,
-	.mngr = NULL,
+	.ctrl = NULL,
 	.backend_net = NULL,
-	.discovery_avahi = NULL,
+	.discovery_net = NULL,
 	.device = NULL,
 	.cmd_itf = NULL,
 };
@@ -55,7 +55,9 @@ static struct test_ctrl s_ctrl = {
  */
 static void ctrl_send_status(struct arsdk_cmd_itf *itf,
 		const struct arsdk_cmd *cmd,
-		enum arsdk_cmd_itf_send_status status,
+		enum arsdk_cmd_buffer_type type,
+		enum arsdk_cmd_itf_cmd_send_status status,
+		uint16_t seq,
 		int done,
 		void *userdata)
 {
@@ -90,11 +92,13 @@ static void ctrl_connected(struct arsdk_device *device,
 	struct test_ctrl *ctrl = userdata;
 	struct arsdk_cmd_itf_cbs cmd_cbs;
 
+	fprintf(stderr, "controller connected\n");
+
 	/* Create command interface object */
 	memset(&cmd_cbs, 0, sizeof(cmd_cbs));
 	cmd_cbs.userdata = ctrl;
 	cmd_cbs.recv_cmd = &ctrl_recv_cmd;
-	cmd_cbs.send_status = &ctrl_send_status;
+	cmd_cbs.cmd_send_status = &ctrl_send_status;
 	res = arsdk_device_create_cmd_itf(device, &cmd_cbs, &ctrl->cmd_itf);
 	CU_ASSERT_EQUAL(res, 0);
 
@@ -108,6 +112,8 @@ static void ctrl_disconnected(struct arsdk_device *device,
 		void *userdata)
 {
 	struct test_ctrl *ctrl = userdata;
+
+	fprintf(stderr, "controller disconnected\n");
 
 	ctrl->device = NULL;
 }
@@ -192,7 +198,7 @@ static void device_removed(struct arsdk_device *device, void *userdata)
 static void test_create_ctrl_backend(struct test_ctrl *ctrl)
 {
 	int res = 0;
-	struct arsdk_backend_net_cfg backend_net_cfg;
+	struct arsdkctrl_backend_net_cfg backend_net_cfg;
 	struct arsdk_discovery_cfg discovery_cfg;
 	static const enum arsdk_device_type types[] = {
 		ARSDK_DEVICE_TYPE_BEBOP,
@@ -202,7 +208,7 @@ static void test_create_ctrl_backend(struct test_ctrl *ctrl)
 	};
 
 	memset(&backend_net_cfg, 0, sizeof(backend_net_cfg));
-	res = arsdk_backend_net_new(ctrl->mngr, &backend_net_cfg,
+	res = arsdkctrl_backend_net_new(ctrl->ctrl, &backend_net_cfg,
 			&ctrl->backend_net);
 	CU_ASSERT_EQUAL(res, 0);
 
@@ -210,13 +216,13 @@ static void test_create_ctrl_backend(struct test_ctrl *ctrl)
 	discovery_cfg.types = types;
 	discovery_cfg.count = sizeof(types) / sizeof(types[0]);
 
-	/* start avahi discovery */
-	res = arsdk_discovery_avahi_new(ctrl->mngr,
-			ctrl->backend_net, &discovery_cfg,
-			&ctrl->discovery_avahi);
+	/* start net discovery */
+	res = arsdk_discovery_net_new(ctrl->ctrl,
+			ctrl->backend_net, &discovery_cfg, "127.0.0.1",
+			&ctrl->discovery_net);
 	CU_ASSERT_EQUAL(res, 0);
 
-	res = arsdk_discovery_avahi_start(ctrl->discovery_avahi);
+	res = arsdk_discovery_net_start(ctrl->discovery_net);
 	CU_ASSERT_EQUAL(res, 0);
 }
 
@@ -226,12 +232,12 @@ static void backend_ctrl_destroy(struct test_ctrl *ctrl)
 {
 	int res = 0;
 
-	if (ctrl->discovery_avahi) {
-		res = arsdk_discovery_avahi_stop(ctrl->discovery_avahi);
+	if (ctrl->discovery_net) {
+		res = arsdk_discovery_net_stop(ctrl->discovery_net);
 		CU_ASSERT_EQUAL(res, 0);
 
-		arsdk_discovery_avahi_destroy(ctrl->discovery_avahi);
-		ctrl->discovery_avahi = NULL;
+		arsdk_discovery_net_destroy(ctrl->discovery_net);
+		ctrl->discovery_net = NULL;
 	}
 
 	if (ctrl->device != NULL) {
@@ -243,7 +249,7 @@ static void backend_ctrl_destroy(struct test_ctrl *ctrl)
 	}
 
 	if (ctrl->backend_net != NULL) {
-		res = arsdk_backend_net_destroy(ctrl->backend_net);
+		res = arsdkctrl_backend_net_destroy(ctrl->backend_net);
 		CU_ASSERT_EQUAL(res, 0);
 
 		ctrl->backend_net = NULL;
@@ -251,20 +257,20 @@ static void backend_ctrl_destroy(struct test_ctrl *ctrl)
 }
 
 /** */
-static void test_create_ctrl_mngr(struct test_ctrl *ctrl)
+static void test_create_ctrl_ctrl(struct test_ctrl *ctrl)
 {
 	int res = 0;
-	struct arsdk_mngr_device_cbs mngr_device_cbs;
+	struct arsdk_ctrl_device_cbs ctrl_device_cbs;
 
 	/* Create device manager */
-	memset(&mngr_device_cbs, 0, sizeof(mngr_device_cbs));
-	mngr_device_cbs.userdata = ctrl;
-	mngr_device_cbs.added = &device_added;
-	mngr_device_cbs.removed = &device_removed;
-	res = arsdk_mngr_new(ctrl->loop, &ctrl->mngr);
+	memset(&ctrl_device_cbs, 0, sizeof(ctrl_device_cbs));
+	ctrl_device_cbs.userdata = ctrl;
+	ctrl_device_cbs.added = &device_added;
+	ctrl_device_cbs.removed = &device_removed;
+	res = arsdk_ctrl_new(ctrl->loop, &ctrl->ctrl);
 	CU_ASSERT_EQUAL(res, 0);
 
-	res = arsdk_mngr_set_device_cbs(ctrl->mngr, &mngr_device_cbs);
+	res = arsdk_ctrl_set_device_cbs(ctrl->ctrl, &ctrl_device_cbs);
 	CU_ASSERT_EQUAL(res, 0);
 }
 
@@ -275,7 +281,7 @@ void test_create_ctrl(struct pomp_loop *loop, struct test_ctrl **ctrl)
 	/*create copy loop pomp*/
 	s_ctrl.loop = loop;
 
-	test_create_ctrl_mngr(&s_ctrl);
+	test_create_ctrl_ctrl(&s_ctrl);
 	test_create_ctrl_backend(&s_ctrl);
 
 	/*return controller*/
@@ -290,7 +296,7 @@ void test_delete_ctrl(struct test_ctrl *ctrl)
 
 	backend_ctrl_destroy(ctrl);
 
-	res = arsdk_mngr_destroy(ctrl->mngr);
+	res = arsdk_ctrl_destroy(ctrl->ctrl);
 	CU_ASSERT_EQUAL(res, 0);
 }
 

@@ -334,9 +334,7 @@ struct arsdk_device_tcp_proxy_cbs {
 ARSDK_API int arsdk_device_create_tcp_proxy(struct arsdk_device *self,
 		enum arsdk_device_type dev_type,
 		uint16_t port,
-#ifndef LIBMUX_LEGACY
 		struct arsdk_device_tcp_proxy_cbs *cbs,
-#endif
 		struct arsdk_device_tcp_proxy **ret_proxy);
 
 /**

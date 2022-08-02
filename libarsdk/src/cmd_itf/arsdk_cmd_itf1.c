@@ -34,14 +34,14 @@
 
 /** */
 struct entry {
-	struct arsdk_cmd                cmd;
-	arsdk_cmd_itf_send_status_cb_t  send_status;
-	void                            *userdata;
-	uint8_t                         seq;
-	int                             waiting_ack;
-	int                             retry_count;
-	int32_t                         max_retry_count;
-	struct timespec                 sent_ts;
+	struct arsdk_cmd                        cmd;
+	arsdk_cmd_itf_cmd_send_status_cb_t      send_status;
+	void                                    *userdata;
+	uint8_t                                 seq;
+	int                                     waiting_ack;
+	int                                     retry_count;
+	int32_t                                 max_retry_count;
+	struct timespec                         sent_ts;
 };
 
 /** */
@@ -95,7 +95,7 @@ static void cmd_log(struct arsdk_cmd_itf1 *self,
  */
 static void entry_init(struct entry *entry,
 		const struct arsdk_cmd *cmd,
-		arsdk_cmd_itf_send_status_cb_t send_status,
+		arsdk_cmd_itf_cmd_send_status_cb_t send_status,
 		void *userdata,
 		int32_t default_retry_count)
 {
@@ -125,11 +125,12 @@ static void entry_clear(struct entry *entry)
 /**
  */
 static void entry_notify(struct entry *entry, struct arsdk_cmd_itf1 *self,
-		enum arsdk_cmd_itf_send_status status, int done)
+		enum arsdk_cmd_itf_cmd_send_status status, int done)
 {
 	/* Notify callback */
 	if (entry->send_status != NULL) {
-		(*entry->send_status)(self->itf, &entry->cmd, status, done,
+		(*entry->send_status)(self->itf, &entry->cmd,
+				ARSDK_CMD_BUFFER_TYPE_INVALID, status, 0, done,
 				entry->userdata);
 	}
 }
@@ -169,7 +170,7 @@ static void queue_stop(struct queue *queue, struct arsdk_cmd_itf1 *self)
 	for (i = 0; i < queue->count; i++) {
 		entry = &queue->entries[pos];
 		entry_notify(entry, self,
-				ARSDK_CMD_ITF_SEND_STATUS_CANCELED, 1);
+				ARSDK_CMD_ITF_CMD_SEND_STATUS_CANCELED, 1);
 		entry_clear(entry);
 
 		/* Continue in circular buffer */
@@ -196,7 +197,7 @@ static int queue_destroy(struct queue *queue, struct arsdk_cmd_itf1 *self)
 static int queue_replace(struct queue *queue,
 		struct arsdk_cmd_itf1 *itf,
 		const struct arsdk_cmd *cmd,
-		arsdk_cmd_itf_send_status_cb_t send_status,
+		arsdk_cmd_itf_cmd_send_status_cb_t send_status,
 		void *userdata)
 {
 	uint32_t i = 0, pos = 0;
@@ -219,7 +220,7 @@ static int queue_replace(struct queue *queue,
 
 replace:
 	/* First cancel current entry, they replace it */
-	entry_notify(entry, itf, ARSDK_CMD_ITF_SEND_STATUS_CANCELED, 1);
+	entry_notify(entry, itf, ARSDK_CMD_ITF_CMD_SEND_STATUS_CANCELED, 1);
 	entry_clear(entry);
 	entry_init(entry, cmd, send_status, userdata,
 		   queue->info.default_max_retry_count);
@@ -231,7 +232,7 @@ replace:
 static int queue_add(struct queue *queue,
 		struct arsdk_cmd_itf1 *itf,
 		const struct arsdk_cmd *cmd,
-		arsdk_cmd_itf_send_status_cb_t send_status,
+		arsdk_cmd_itf_cmd_send_status_cb_t send_status,
 		void *userdata)
 {
 	uint32_t newdepth = 0;
@@ -417,7 +418,8 @@ again:
 			/* Max retry count reached, notify timeout and
 			 * continue with next entry in queue */
 			entry_notify(entry, self,
-					ARSDK_CMD_ITF_SEND_STATUS_TIMEOUT, 1);
+				ARSDK_CMD_ITF_CMD_SEND_STATUS_TIMEOUT,
+				1);
 			queue_pop(queue);
 			goto again;
 		}
@@ -464,7 +466,7 @@ again:
 	if (res < 0)
 		return;
 
-	entry_notify(entry, self, ARSDK_CMD_ITF_SEND_STATUS_SENT,
+	entry_notify(entry, self, ARSDK_CMD_ITF_CMD_SEND_STATUS_PACKED,
 			queue->info.type != ARSDK_TRANSPORT_DATA_TYPE_WITHACK);
 	queue->last_sent_ts = *tsnow;
 	if (queue->info.type == ARSDK_TRANSPORT_DATA_TYPE_WITHACK) {
@@ -564,7 +566,7 @@ static void recv_ack(struct arsdk_cmd_itf1 *self,
 
 		self->lnqlt.ack_count++;
 		entry_notify(entry, self,
-				ARSDK_CMD_ITF_SEND_STATUS_ACK_RECEIVED, 1);
+				ARSDK_CMD_ITF_CMD_SEND_STATUS_ACK_RECEIVED, 1);
 		queue_pop(queue);
 		return;
 	}
@@ -667,7 +669,7 @@ int arsdk_cmd_itf1_stop(struct arsdk_cmd_itf1 *self)
  */
 int arsdk_cmd_itf1_send(struct arsdk_cmd_itf1 *self,
 		const struct arsdk_cmd *cmd,
-		arsdk_cmd_itf_send_status_cb_t send_status,
+		arsdk_cmd_itf_cmd_send_status_cb_t send_status,
 		void *userdata)
 {
 	int res = 0;
@@ -683,7 +685,7 @@ int arsdk_cmd_itf1_send(struct arsdk_cmd_itf1 *self,
 
 	/* Use default callback if none given */
 	if (send_status == NULL) {
-		send_status = self->itf_cbs.send_status;
+		send_status = self->itf_cbs.cmd_send_status;
 		userdata = self->itf_cbs.userdata;
 	}
 

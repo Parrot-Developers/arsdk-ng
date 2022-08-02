@@ -95,7 +95,7 @@ int arsdk_cmd_itf3_destroy(struct arsdk_cmd_itf3 *itf);
  */
 int arsdk_cmd_itf3_send(struct arsdk_cmd_itf3 *self,
 		const struct arsdk_cmd *cmd,
-		arsdk_cmd_itf_send_status_cb_t send_status,
+		arsdk_cmd_itf_cmd_send_status_cb_t send_status,
 		void *userdata);
 
 /**

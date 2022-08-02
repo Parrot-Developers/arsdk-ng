@@ -87,31 +87,99 @@ enum arsdk_cmd_dir {
 };
 
 /**
+ * Pack send status.
+ */
+enum arsdk_cmd_itf_pack_send_status {
+	ARSDK_CMD_ITF_PACK_SEND_STATUS_SENT,         /**< Sent on the network */
+	ARSDK_CMD_ITF_PACK_SEND_STATUS_ACK_RECEIVED, /**< Ack received */
+	ARSDK_CMD_ITF_PACK_SEND_STATUS_TIMEOUT,      /**< No ack received */
+	ARSDK_CMD_ITF_PACK_SEND_STATUS_CANCELED,     /**< Not sent */
+};
+
+/**
+ * Pack receive status.
+ */
+enum arsdk_cmd_itf_pack_recv_status {
+	/** Acknowledgement sent. */
+	ARSDK_CMD_ITF_PACK_RECV_STATUS_ACK_SENT,
+	/** Processed. */
+	ARSDK_CMD_ITF_PACK_RECV_STATUS_PROCESSED,
+	/** Ignored */
+	ARSDK_CMD_ITF_PACK_RECV_STATUS_IGNORED,
+};
+
+/**
  * Command send status.
  */
-enum arsdk_cmd_itf_send_status {
-	ARSDK_CMD_ITF_SEND_STATUS_SENT,          /**< Sent on the network */
-	ARSDK_CMD_ITF_SEND_STATUS_ACK_RECEIVED,  /**< Ack received */
-	ARSDK_CMD_ITF_SEND_STATUS_TIMEOUT,       /**< No ack received */
-	ARSDK_CMD_ITF_SEND_STATUS_CANCELED,      /**< Not sent */
+enum arsdk_cmd_itf_cmd_send_status {
+	/** Partially packed. */
+	ARSDK_CMD_ITF_CMD_SEND_STATUS_PARTIALLY_PACKED,
+	/** Packed and completely sent. */
+	ARSDK_CMD_ITF_CMD_SEND_STATUS_PACKED,
+	/** Acknowledgement of the last pack of the command received. */
+	ARSDK_CMD_ITF_CMD_SEND_STATUS_ACK_RECEIVED,
+	/** No ack received. */
+	ARSDK_CMD_ITF_CMD_SEND_STATUS_TIMEOUT,
+	/** Not sent. */
+	ARSDK_CMD_ITF_CMD_SEND_STATUS_CANCELED,
 };
 
 /**
  * Function called to indicate status of sent commands.
  * @param itf : interface object.
  * @param cmd : command structure.
+ * @param type : command type.
  * @param status : status of send operation.
+ * @param seq : pack sequence id ; if `status` is `PARTIALLY_PACKED` or `PACKED`
+ * otherwise `0`.
  * @param done : indicates that frame is no longer used internally.
  * @param userdata : user data.
  *
  * @remarks the function can be called several times depending on internal
- * configuration (ex: SENT then ACK_RECEIVED). The flag done at 1 indicates
+ * configuration (ex: PACKED then ACK_RECEIVED). The flag done at 1 indicates
  * the last call.
  */
-typedef void (*arsdk_cmd_itf_send_status_cb_t)(struct arsdk_cmd_itf *itf,
+typedef void (*arsdk_cmd_itf_cmd_send_status_cb_t)(struct arsdk_cmd_itf *itf,
 		const struct arsdk_cmd *cmd,
-		enum arsdk_cmd_itf_send_status status,
+		enum arsdk_cmd_buffer_type type,
+		enum arsdk_cmd_itf_cmd_send_status status,
+		uint16_t seq,
 		int done,
+		void *userdata);
+
+/**
+ * Function called to indicate status of sent pack.
+ * @param itf : interface object.
+ * @param seq : pack sequence id.
+ * @param type : pack type.
+ * @param len : pack length.
+ * @param status : status of send operation.
+ * @param count : sending count if `status` is `SENT`,
+ * acknowledgement received count if `status` is `ACK_RECEIVED`, otherwise `0`.
+ * @param userdata : user data.
+ */
+typedef void (*arsdk_cmd_itf_pack_send_status_cb_t)(struct arsdk_cmd_itf *itf,
+		int seq,
+		enum arsdk_cmd_buffer_type type,
+		size_t len,
+		enum arsdk_cmd_itf_pack_send_status status,
+		uint32_t count,
+		void *userdata);
+
+/**
+ * Function called to indicate status of received packs.
+ * @param itf : interface object.
+ * @param seq : pack sequence id.
+ * @param type : pack type.
+ * @param len : pack length.
+ * @param status : status of send operation.
+ * @param userdata : user data.
+ */
+typedef void (*arsdk_cmd_itf_pack_recv_status_cb_t)(struct arsdk_cmd_itf *itf,
+		int seq,
+		enum arsdk_cmd_buffer_type type,
+		size_t len,
+		enum arsdk_cmd_itf_pack_recv_status status,
 		void *userdata);
 
 /**
@@ -170,7 +238,13 @@ struct arsdk_cmd_itf_cbs {
 			void *userdata);
 
 	/** Function called to indicate status of sent commands. */
-	arsdk_cmd_itf_send_status_cb_t send_status;
+	arsdk_cmd_itf_cmd_send_status_cb_t cmd_send_status;
+
+	/** Function called to indicate status of sent packs. */
+	arsdk_cmd_itf_pack_send_status_cb_t pack_send_status;
+
+	/** Function called to indicate status of received packs. */
+	arsdk_cmd_itf_pack_recv_status_cb_t pack_recv_status;
 
 	/**
 	 * Function called to inform about the link quality.
@@ -191,12 +265,28 @@ struct arsdk_cmd_itf_cbs {
 };
 
 /**
- * Get the string description of a send status.
+ * Get the string description of a command send status.
  * @param status : send status to convert.
  * @return string description of the send status.
  */
-ARSDK_API const char *arsdk_cmd_itf_send_status_str(
-		enum arsdk_cmd_itf_send_status val);
+ARSDK_API const char *arsdk_cmd_itf_cmd_send_status_str(
+		enum arsdk_cmd_itf_cmd_send_status val);
+
+/**
+ * Get the string description of a pack send status.
+ * @param status : send status to convert.
+ * @return string description of the send status.
+ */
+ARSDK_API const char *arsdk_cmd_itf_pack_send_status_str(
+		enum arsdk_cmd_itf_pack_send_status val);
+
+/**
+ * Get the string description of a pack receive status.
+ * @param status : receive status to convert.
+ * @return string description of the receive status.
+ */
+ARSDK_API const char *arsdk_cmd_itf_pack_recv_status_str(
+		enum arsdk_cmd_itf_pack_recv_status val);
 
 /**
  * Set os specific data associated with the interface.
@@ -224,7 +314,7 @@ ARSDK_API void *arsdk_cmd_itf_get_osdata(struct arsdk_cmd_itf *itf);
  */
 ARSDK_API int arsdk_cmd_itf_send(struct arsdk_cmd_itf *itf,
 		const struct arsdk_cmd *cmd,
-		arsdk_cmd_itf_send_status_cb_t send_status,
+		arsdk_cmd_itf_cmd_send_status_cb_t send_status,
 		void *userdata);
 
 /**

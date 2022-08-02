@@ -38,6 +38,7 @@
 #include <libmux.h>
 
 #include "arsdkctrl/arsdkctrl.h"
+#include <arsdkctrl/internal/arsdkctrl_internal.h>
 #define ULOG_TAG controller
 #include "ulog.h"
 ULOG_DECLARE_TAG(controller);
@@ -77,8 +78,12 @@ struct app {
 	struct arsdk_discovery_avahi    *discovery_avahi;
 	struct arsdk_discovery_net      *discovery_net;
 	char                            *net_device_ip;
+	struct arsdk_discovery          *discovery_direct;
+	char                            *direct_addr;
+	int                             direct_port;
 	int                             use_discovery_net;
 	int                             use_discovery_avahi;
+	int                             use_discovery_direct;
 	struct arsdk_device             *device;
 	struct arsdk_cmd_itf            *cmd_itf;
 	struct {
@@ -194,8 +199,12 @@ static struct app s_app = {
 	.discovery_avahi = NULL,
 	.discovery_net = NULL,
 	.net_device_ip = NULL,
+	.discovery_direct = NULL,
+	.direct_addr = NULL,
+	.direct_port = 0,
 	.use_discovery_net = 0,
 	.use_discovery_avahi = 1,
+	.use_discovery_direct = 0,
 	.device = NULL,
 	.cmd_itf = NULL,
 	.mux = {
@@ -1063,6 +1072,23 @@ static void tcp_send_raw_cb(struct pomp_ctx *ctx,
 	fprintf(stderr, "tcp received data: %s \n", cdata);
 }
 
+static void tcp_proxy_open_cb(struct arsdk_device_tcp_proxy *self, uint16_t localport,
+		void *userdata)
+{
+	LOGI("%s", __func__);
+}
+
+static void tcp_proxy_close_cb(struct arsdk_device_tcp_proxy *self, void *userdata)
+{
+	LOGI("%s", __func__);
+}
+
+static struct arsdk_device_tcp_proxy_cbs s_tcp_proxy_cbs = {
+	.userdata = &s_app,
+	.open = &tcp_proxy_open_cb,
+	.close = &tcp_proxy_close_cb,
+};
+
 static void tcp_send_run(struct app *app)
 {
 	int res = 0;
@@ -1076,6 +1102,7 @@ static void tcp_send_run(struct app *app)
 	res = arsdk_device_create_tcp_proxy(app->device,
 			app->tcp_send.dev_type,
 			app->tcp_send.port,
+			&s_tcp_proxy_cbs,
 			&app->tcp_send.proxy);
 	if (res < 0) {
 		LOG_ERRNO("arsdk_device_create_tcp_proxy", -res);
@@ -1109,12 +1136,14 @@ static void tcp_send_run(struct app *app)
  */
 static void send_status(struct arsdk_cmd_itf *itf,
 		const struct arsdk_cmd *cmd,
-		enum arsdk_cmd_itf_send_status status,
+		enum arsdk_cmd_buffer_type type,
+		enum arsdk_cmd_itf_cmd_send_status status,
+		uint16_t seq,
 		int done,
 		void *userdata)
 {
 	LOGI("cmd %u,%u,%u: %s%s", cmd->prj_id, cmd->cls_id, cmd->cmd_id,
-			arsdk_cmd_itf_send_status_str(status),
+			arsdk_cmd_itf_cmd_send_status_str(status),
 			done ? "(DONE)" : "");
 }
 
@@ -1263,12 +1292,6 @@ static void send_start_video(struct app *app)
 	case ARSDK_DEVICE_TYPE_JS_EVO_LIGHT :
 	case ARSDK_DEVICE_TYPE_JS_EVO_RACE :
 	case ARSDK_DEVICE_TYPE_POWERUP :
-		res = arsdk_cmd_send_Jpsumo_MediaStreaming_VideoEnable(
-				app->cmd_itf, &send_status, app, 1);
-		if (res < 0)
-			LOG_ERRNO("arsdk_cmd_enc", -res);
-		break;
-
 	case ARSDK_DEVICE_TYPE_RS :
 	case ARSDK_DEVICE_TYPE_RS_EVO_LIGHT :
 	case ARSDK_DEVICE_TYPE_RS_EVO_BRICK :
@@ -1356,16 +1379,6 @@ static void timer_cb(struct pomp_timer *timer, void *userdata)
 	case ARSDK_DEVICE_TYPE_JS_EVO_LIGHT :
 	case ARSDK_DEVICE_TYPE_JS_EVO_RACE :
 	case ARSDK_DEVICE_TYPE_POWERUP :
-		res = arsdk_cmd_enc_Jpsumo_Piloting_PCMD(&cmd,
-				0 /*_flag*/,
-				0 /*_spped*/,
-				0 /*_turn*/);
-		if (res < 0) {
-			LOG_ERRNO("arsdk_cmd_enc", -res);
-			goto end;
-		}
-		break;
-
 	case ARSDK_DEVICE_TYPE_RS :
 	case ARSDK_DEVICE_TYPE_RS_EVO_LIGHT :
 	case ARSDK_DEVICE_TYPE_RS_EVO_BRICK :
@@ -1490,7 +1503,7 @@ static void connected(struct arsdk_device *device,
 	memset(&cmd_cbs, 0, sizeof(cmd_cbs));
 	cmd_cbs.userdata = app;
 	cmd_cbs.recv_cmd = &recv_cmd;
-	cmd_cbs.send_status = &send_status;
+	cmd_cbs.cmd_send_status = &send_status;
 	cmd_cbs.link_quality = &link_quality;
 	res = arsdk_device_create_cmd_itf(device, &cmd_cbs, &app->cmd_itf);
 	if (res < 0)
@@ -1735,6 +1748,29 @@ static void backend_create(struct app *app)
 				LOG_ERRNO("arsdk_discovery_net_start", -res);
 		}
 
+		if (app->use_discovery_direct) {
+			res = arsdk_discovery_new("direct",
+					arsdkctrl_backend_net_get_parent(app->backend_net),
+					app->ctrl,
+					&app->discovery_direct);
+			if (res < 0)
+				LOG_ERRNO("arsdk_discovery_new", -res);
+
+			res = arsdk_discovery_start(app->discovery_direct);
+			if (res < 0)
+				LOG_ERRNO("arsdk_discovery_start", -res);
+
+			struct arsdk_discovery_device_info dev_info = {
+				.id = "12345678",
+				.name = "ARDrone service",
+				.type = ARSDK_DEVICE_TYPE_BEBOP_2,
+				.port = app->direct_port,
+				.addr = app->direct_addr,
+			};
+
+			arsdk_discovery_add_device(app->discovery_direct, &dev_info);
+		}
+
 		break;
 
 	case ARSDK_BACKEND_TYPE_MUX:
@@ -1788,6 +1824,15 @@ static void backend_destroy(struct app *app)
 
 		arsdk_discovery_net_destroy(app->discovery_net);
 		app->discovery_net = NULL;
+	}
+
+	if (app->discovery_direct) {
+		res = arsdk_discovery_stop(app->discovery_direct);
+		if (res < 0)
+			LOG_ERRNO("arsdk_discovery_stop", -res);
+
+		arsdk_discovery_destroy(app->discovery_direct);
+		app->discovery_direct = NULL;
 	}
 
 	if (app->discovery_mux) {
@@ -1942,6 +1987,7 @@ static void usage(const char *progname)
 		"  --no-discovery-avahi\n"
 		"  --discovery-net <device_ip>\n"
 		"  --no-discovery-net\n"
+		"  --discovery-direct <addr> <port> (ex. 127.0.0.1 44444)\n"
 		"  --mux\n"
 		"  --mux-bridge <bridge_ip> <bridge_port>\n"
 		"  --ftp-get <remote_path> <local_path>\n"
@@ -2127,6 +2173,26 @@ int main(int argc, char *argv[])
 			s_app.backend_type = ARSDK_BACKEND_TYPE_NET;
 		} else if (strcmp(argv[argidx], "--no-discovery-net") == 0) {
 			s_app.use_discovery_net = 0;
+		} else if (strcmp(argv[argidx], "--discovery-direct") == 0) {
+			s_app.use_discovery_direct = 1;
+
+			argidx++;
+			if ((argidx >= argc) || (argv[argidx][0] == '-')) {
+				fprintf(stderr, "Missing discovery direct "
+						"address\n");
+				usage(argv[0]);
+				return -1;
+			}
+			s_app.direct_addr = argv[argidx];
+
+			argidx++;
+			if ((argidx >= argc) || (argv[argidx][0] == '-')) {
+				fprintf(stderr, "Missing discovery direct "
+						"port\n");
+				usage(argv[0]);
+				return -1;
+			}
+			s_app.direct_port = atoi(argv[argidx]);
 		} else if (strcmp(argv[argidx], "--ftp-get") == 0) {
 			argidx++;
 			if ((argidx >= argc) || (argv[argidx][0] == '-')) {

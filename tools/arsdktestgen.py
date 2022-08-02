@@ -131,7 +131,7 @@ def gen_test_dec_cmds(ctx, ftr, cls, msg, out):
         if argObj.argType == arsdkparser.ArArgType.STRING:
             out.write("\tCU_ASSERT_STRING_EQUAL(_%s, " % argObj.name)
         elif argObj.argType == arsdkparser.ArArgType.BINARY:
-            out.write("\tCU_ASSERT_EQUAL(memcmp(&_%s, " % argObj.name)
+            pass
         else:
             out.write("\tCU_ASSERT_EQUAL(_%s, " % argObj.name)
 
@@ -143,7 +143,8 @@ def gen_test_dec_cmds(ctx, ftr, cls, msg, out):
         elif isinstance(argObj.argType, arsdkparser.ArBitfield):
             out.write("%s",_get_arg_default_val(argObj.argType.btfType))
         elif argObj.argType == arsdkparser.ArArgType.BINARY:
-            out.write("&s_binary_val, sizeof(s_binary_val)), 0")
+            out.write("\tCU_ASSERT_EQUAL(_%s.len, s_binary_val.len);\n" % argObj.name)
+            out.write("\tCU_ASSERT_EQUAL(memcmp(_%s.cdata, s_binary_val.cdata, s_binary_val.len), 0" % argObj.name)
         else:
             out.write("%s",_get_arg_default_val(argObj.argType))
         out.write(");\n")
@@ -281,7 +282,9 @@ def gen_protoc_c(ctx, out):
     out.write(" */\n")
     out.write("static void send_status(struct arsdk_cmd_itf *itf,\n")
     out.write("\t\tconst struct arsdk_cmd *cmd,\n")
-    out.write("\t\tenum arsdk_cmd_itf_send_status status,\n")
+    out.write("\t\tenum arsdk_cmd_buffer_type type,\n")
+    out.write("\t\tenum arsdk_cmd_itf_cmd_send_status status,\n")
+    out.write("\t\tuint16_t seq,\n")
     out.write("\t\tint done,\n")
     out.write("\t\tvoid *userdata)\n")
     out.write("{\n")
@@ -314,6 +317,7 @@ def gen_protoc_c(ctx, out):
     out.write("\t/* Save cmd itf. */\n")
     out.write("\ts_test_msg.cmd_itf = test_ctrl_get_itf(ctrl);\n")
     out.write("\n")
+    out.write("\tfprintf(stderr, \"send all existing commands ...\\n\");\n")
     out.write("\ttest_send_next_msg(s_test_msg.cmd_itf);\n")
     out.write("}\n")
 

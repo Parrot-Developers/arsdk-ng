@@ -103,11 +103,11 @@
 /** Queue entry */
 struct entry {
 	/** Command to send */
-	struct arsdk_cmd                cmd;
+	struct arsdk_cmd                    cmd;
 	/** Callback to notify the command sending status. */
-	arsdk_cmd_itf_send_status_cb_t  send_status;
+	arsdk_cmd_itf_cmd_send_status_cb_t  send_status;
 	/** User data given in callbacks */
-	void                            *userdata;
+	void                                *userdata;
 };
 
 /** Sending Queue */
@@ -216,7 +216,7 @@ static void cmd_log(struct arsdk_cmd_itf2 *self,
  */
 static void entry_init(struct entry *entry,
 		const struct arsdk_cmd *cmd,
-		arsdk_cmd_itf_send_status_cb_t send_status,
+		arsdk_cmd_itf_cmd_send_status_cb_t send_status,
 		void *userdata)
 {
 	memset(entry, 0, sizeof(*entry));
@@ -237,11 +237,12 @@ static void entry_clear(struct entry *entry)
 /**
  */
 static void entry_notify(struct entry *entry, struct arsdk_cmd_itf2 *self,
-		enum arsdk_cmd_itf_send_status status, int done)
+		enum arsdk_cmd_itf_cmd_send_status status, int done)
 {
 	/* Notify callback */
 	if (entry->send_status != NULL) {
-		(*entry->send_status)(self->itf, &entry->cmd, status, done,
+		(*entry->send_status)(self->itf, &entry->cmd,
+				ARSDK_CMD_BUFFER_TYPE_INVALID, status, 0, done,
 				entry->userdata);
 	}
 }
@@ -296,7 +297,8 @@ static void queue_stop(struct queue *queue, struct arsdk_cmd_itf2 *itf)
 	pos = queue->head;
 	for (i = 0; i < queue->count; i++) {
 		entry = &queue->entries[pos];
-		entry_notify(entry, itf, ARSDK_CMD_ITF_SEND_STATUS_CANCELED, 1);
+		entry_notify(entry, itf, ARSDK_CMD_ITF_CMD_SEND_STATUS_CANCELED,
+				1);
 		entry_clear(entry);
 
 		/* Continue in circular buffer */
@@ -324,7 +326,7 @@ static int queue_destroy(struct queue *queue, struct arsdk_cmd_itf2 *itf)
 static int queue_add(struct queue *queue,
 		struct arsdk_cmd_itf2 *itf,
 		const struct arsdk_cmd *cmd,
-		arsdk_cmd_itf_send_status_cb_t send_status,
+		arsdk_cmd_itf_cmd_send_status_cb_t send_status,
 		void *userdata)
 {
 	uint32_t newdepth = 0;
@@ -551,7 +553,7 @@ again:
 
 	/* notify each command sent in the pack */
 	queue_for_each_packed_entry(queue, entry) {
-		entry_notify(entry, self, ARSDK_CMD_ITF_SEND_STATUS_SENT,
+		entry_notify(entry, self, ARSDK_CMD_ITF_CMD_SEND_STATUS_PACKED,
 				queue->info.type !=
 				ARSDK_TRANSPORT_DATA_TYPE_WITHACK);
 	}
@@ -679,7 +681,7 @@ static void recv_ack(struct arsdk_cmd_itf2 *self,
 		for (entry_i = 0; entry_i < queue->pack.cmd_count; entry_i++) {
 			entry = &queue->entries[queue->head];
 			entry_notify(entry, self,
-				     ARSDK_CMD_ITF_SEND_STATUS_ACK_RECEIVED,
+				     ARSDK_CMD_ITF_CMD_SEND_STATUS_ACK_RECEIVED,
 				     1);
 			queue_pop(queue);
 		}
@@ -795,7 +797,7 @@ int arsdk_cmd_itf2_stop(struct arsdk_cmd_itf2 *self)
  */
 int arsdk_cmd_itf2_send(struct arsdk_cmd_itf2 *self,
 		const struct arsdk_cmd *cmd,
-		arsdk_cmd_itf_send_status_cb_t send_status,
+		arsdk_cmd_itf_cmd_send_status_cb_t send_status,
 		void *userdata)
 {
 	int res = 0;
@@ -810,7 +812,7 @@ int arsdk_cmd_itf2_send(struct arsdk_cmd_itf2 *self,
 
 	/* Use default callback if none given */
 	if (send_status == NULL) {
-		send_status = self->itf_cbs.send_status;
+		send_status = self->itf_cbs.cmd_send_status;
 		userdata = self->itf_cbs.userdata;
 	}
 

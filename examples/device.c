@@ -115,12 +115,14 @@ static struct app s_app = {
  */
 static void send_status(struct arsdk_cmd_itf *itf,
 		const struct arsdk_cmd *cmd,
-		enum arsdk_cmd_itf_send_status status,
+		enum arsdk_cmd_buffer_type type,
+		enum arsdk_cmd_itf_cmd_send_status status,
+		uint16_t seq,
 		int done,
 		void *userdata)
 {
 	LOGI("cmd %u,%u,%u: %s%s", cmd->prj_id, cmd->cls_id, cmd->cmd_id,
-			arsdk_cmd_itf_send_status_str(status),
+			arsdk_cmd_itf_cmd_send_status_str(status),
 			done ? "(DONE)" : "");
 }
 
@@ -196,7 +198,7 @@ static void connected(struct arsdk_peer *peer,
 	memset(&cmd_cbs, 0, sizeof(cmd_cbs));
 	cmd_cbs.userdata = app;
 	cmd_cbs.recv_cmd = &recv_cmd;
-	cmd_cbs.send_status = &send_status;
+	cmd_cbs.cmd_send_status = &send_status;
 	cmd_cbs.link_quality = &link_quality;
 	res = arsdk_peer_create_cmd_itf(peer, &cmd_cbs, &app->cmd_itf);
 	if (res < 0)

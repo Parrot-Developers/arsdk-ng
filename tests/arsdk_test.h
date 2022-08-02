@@ -55,4 +55,8 @@ extern CU_SuiteInfo g_suites_cmd_itf[];
  */
 extern CU_SuiteInfo g_suites_enc_dec[];
 
+/**
+ */
+extern CU_SuiteInfo g_suites_protoc[];
+
 #endif /* !_ARSDK_TEST_H_ */

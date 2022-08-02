@@ -13,7 +13,7 @@ LOCAL_EXPORT_C_INCLUDES := \
 
 # Public API headers - top level headers first
 # This header list is currently used to generate a python binding
-LOCAL_EXPORT_CUSTOM_VARIABLES := LIBARSDK_HEADERS=$\
+LIBARSDK_HEADERS := $\
 	$(LOCAL_PATH)/libarsdk/include/arsdk/arsdk.h:$\
 	$(LOCAL_PATH)/libarsdk/include/arsdk/arsdk_desc.h:$\
 	$(LOCAL_PATH)/libarsdk/include/arsdk/arsdk_cmd_itf.h:$\
@@ -24,7 +24,8 @@ LOCAL_EXPORT_CUSTOM_VARIABLES := LIBARSDK_HEADERS=$\
 	$(LOCAL_PATH)/libarsdk/include/arsdk/arsdk_publisher_avahi.h:$\
 	$(LOCAL_PATH)/libarsdk/include/arsdk/arsdk_publisher_net.h:$\
 	$(LOCAL_PATH)/libarsdk/include/arsdk/arsdk_publisher_mux.h:$\
-	$(LOCAL_PATH)/libarsdk/include/arsdk/arsdk_peer.h;
+	$(LOCAL_PATH)/libarsdk/include/arsdk/arsdk_peer.h
+LOCAL_EXPORT_CUSTOM_VARIABLES := LIBARSDK_HEADERS=$(LIBARSDK_HEADERS);
 
 LOCAL_C_INCLUDES := \
 	$(LOCAL_PATH)/libarsdk/src
@@ -110,7 +111,7 @@ LOCAL_EXPORT_C_INCLUDES := \
 
 # Public API headers - top level headers first
 # This header list is currently used to generate a python binding
-LOCAL_EXPORT_CUSTOM_VARIABLES := LIBARSDKCTRL_HEADERS=$\
+LIBARSDKCTRL_HEADERS := $\
 	$(LOCAL_PATH)/libarsdkctrl/include/arsdkctrl/arsdkctrl.h:$\
 	$(LOCAL_PATH)/libarsdk/include/arsdk/arsdk.h:$\
 	$(LOCAL_PATH)/libarsdkctrl/include/arsdkctrl/arsdk_ctrl.h:$\
@@ -129,7 +130,8 @@ LOCAL_EXPORT_CUSTOM_VARIABLES := LIBARSDKCTRL_HEADERS=$\
 	$(LOCAL_PATH)/libarsdkctrl/include/arsdkctrl/arsdk_pud_itf.h:$\
 	$(LOCAL_PATH)/libarsdkctrl/include/arsdkctrl/arsdk_ephemeris_itf.h:$\
 	$(LOCAL_PATH)/libarsdkctrl/include/arsdkctrl/arsdk_device.h:$\
-	$(LOCAL_PATH)/libarsdkctrl/include/arsdkctrl/internal/arsdk_discovery_internal.h;
+	$(LOCAL_PATH)/libarsdkctrl/include/arsdkctrl/internal/arsdk_discovery_internal.h
+LOCAL_EXPORT_CUSTOM_VARIABLES := LIBARSDKCTRL_HEADERS=$(LIBARSDKCTRL_HEADERS);
 
 LOCAL_C_INCLUDES := \
 	$(LOCAL_PATH)/libarsdk/include \
@@ -142,7 +144,9 @@ LOCAL_SRC_FILES := \
 	libarsdkctrl/src/arsdkctrl_log.c \
 	libarsdkctrl/src/arsdk_discovery.c \
 	libarsdkctrl/src/arsdk_ctrl.c \
+	libarsdkctrl/src/arsdk_device.c \
 	libarsdkctrl/src/arsdkctrl_backend.c \
+	libarsdkctrl/src/arsdk_ftp_itf.c \
 	libarsdkctrl/src/arsdk_media_itf.c \
 	libarsdkctrl/src/arsdk_updater_itf.c \
 	libarsdkctrl/src/arsdk_blackbox_itf.c \
@@ -154,17 +158,6 @@ LOCAL_SRC_FILES := \
 	libarsdkctrl/src/updater/arsdk_updater_transport.c \
 	libarsdkctrl/src/updater/arsdk_updater_transport_ftp.c \
 	libarsdkctrl/src/updater/arsdk_updater_transport_mux.c
-
-ifeq ($(CONFIG_ALCHEMY_BUILD_LIBMUX_LEGACY_CONFIG),y)
-LOCAL_SRC_FILES += \
-	libarsdkctrl/src/arsdk_ftp_itf_mux_legacy.c \
-	libarsdkctrl/src/arsdk_device_mux_legacy.c
-LOCAL_CFLAGS += -DLIBMUX_LEGACY=1
-else
-LOCAL_SRC_FILES += \
-	libarsdkctrl/src/arsdk_ftp_itf.c \
-	libarsdkctrl/src/arsdk_device.c
-endif
 
 LOCAL_SRC_FILES += \
 	libarsdkctrl/src/net/arsdkctrl_backend_net.c \
@@ -199,6 +192,37 @@ endif
 
 include $(BUILD_LIBRARY)
 
+
+###############################################################################
+###############################################################################
+
+include $(CLEAR_VARS)
+
+LOCAL_MODULE := libarsdklog
+
+LOCAL_EXPORT_C_INCLUDES := \
+	$(LOCAL_PATH)/libarsdklog/include
+
+# Public API headers - top level headers first
+# This header list is currently used to generate a python binding
+LIBARSDKLOG_HEADERS := $\
+	$(LOCAL_PATH)/libarsdklog/include/arsdklog/arsdklog.h
+LOCAL_EXPORT_CUSTOM_VARIABLES := LIBARSDKLOG_HEADERS=$(LIBARSDKLOG_HEADERS);
+
+LOCAL_CFLAGS := -DARSDKLOG_API_EXPORTS -fvisibility=hidden
+
+LOCAL_SRC_FILES := \
+	libarsdklog/src/arsdklog.c \
+
+LOCAL_LIBRARIES += libarsdk \
+	libarsdk-pbc \
+	libpomp \
+	libulog
+LOCAL_CONDITIONAL_LIBRARIES := \
+	OPTIONAL:libmsghub
+
+include $(BUILD_LIBRARY)
+
 ###############################################################################
 ###############################################################################
 
@@ -220,6 +244,34 @@ LOCAL_MODULE := arsdk-ng-device
 LOCAL_SRC_FILES := examples/device.c
 LOCAL_LIBRARIES := libpomp libulog libmux libarsdk
 include $(BUILD_EXECUTABLE)
+
+###############################################################################
+# Python bindings
+###############################################################################
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := libarsdk-py
+LOCAL_LIBRARIES := libarsdk
+LOCAL_CATEGORY_PATH := libs
+LOCAL_EXPAND_CUSTOM_VARIABLES := 1
+LOCAL_CUSTOM_MACROS := \
+	pybinding-macro:libarsdk,libarsdk,$(LIBARSDK_HEADERS),$(TARGET_OUT_STAGING)/usr/lib/libarsdk.so
+include $(BUILD_CUSTOM)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := libarsdkctrl-py
+LOCAL_LIBRARIES := libarsdkctrl libarsdk-py
+LOCAL_CATEGORY_PATH := libs
+LOCAL_EXPAND_CUSTOM_VARIABLES := 1
+LOCAL_CUSTOM_MACROS := \
+	pybinding-macro:libarsdkctrl_bindings,libarsdkctrl,$(LIBARSDKCTRL_HEADERS),$(TARGET_OUT_STAGING)/usr/lib/libarsdkctrl.so
+
+$(foreach __f,$(call all-files-under,libarsdkctrl/python,.py), \
+	$(eval LOCAL_COPY_FILES += $(__f):usr/lib/python/site-packages/libarsdkctrl/$(patsubst libarsdkctrl/python/%,%,$(__f))) \
+)
+
+include $(BUILD_CUSTOM)
+
 
 ###############################################################################
 ###############################################################################
@@ -246,7 +298,10 @@ LOCAL_SRC_FILES := \
 	tests/env/arsdk_test_env_mux_tip.c \
 	tests/env/arsdk_test_env_ctrl.c \
 	tests/arsdk_test_cmd_itf.c \
-	tests/arsdk_test_enc_dec.c
+	tests/arsdk_test_enc_dec.c \
+	tests/arsdk_test_protoc.c \
+	tests/arsdk_test_protoc_ctrl.c \
+	tests/arsdk_test_protoc_dev.c
 
 LOCAL_LIBRARIES := libarsdk \
 		   libarsdkctrl \

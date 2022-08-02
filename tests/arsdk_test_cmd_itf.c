@@ -129,12 +129,14 @@ struct arsdk_cmd_desc s_cmd_ack_desc3 = {
 
 static void send_status_cb (struct arsdk_cmd_itf *itf,
 		const struct arsdk_cmd *cmd,
-		enum arsdk_cmd_itf_send_status status,
+		enum arsdk_cmd_buffer_type type,
+		enum arsdk_cmd_itf_cmd_send_status status,
+		uint16_t seq,
 		int done,
 		void *userdata)
 {
 	TST_LOG("cmd %u,%u,%u: %s%s", cmd->prj_id, cmd->cls_id, cmd->cmd_id,
-			arsdk_cmd_itf_send_status_str(status),
+			arsdk_cmd_itf_cmd_send_status_str(status),
 			done ? "(DONE)" : "");
 }
 
@@ -219,12 +221,14 @@ static void recv_cmd(const struct arsdk_cmd *cmd)
  */
 static void ctrl_send_status(struct arsdk_cmd_itf *itf,
 		const struct arsdk_cmd *cmd,
-		enum arsdk_cmd_itf_send_status status,
+		enum arsdk_cmd_buffer_type type,
+		enum arsdk_cmd_itf_cmd_send_status status,
+		uint16_t seq,
 		int done,
 		void *userdata)
 {
 	TST_LOG("cmd %u,%u,%u: %s%s", cmd->prj_id, cmd->cls_id, cmd->cmd_id,
-			arsdk_cmd_itf_send_status_str(status),
+			arsdk_cmd_itf_cmd_send_status_str(status),
 			done ? "(DONE)" : "");
 }
 
@@ -279,7 +283,7 @@ static void ctrl_connected(struct arsdk_device *device,
 	struct arsdk_cmd_itf_cbs cmd_cbs = {
 		.userdata = data,
 		.recv_cmd = &ctrl_recv_cmd,
-		.send_status = &ctrl_send_status,
+		.cmd_send_status = &ctrl_send_status,
 		.link_quality = &ctrl_link_quality,
 	};
 	int res = arsdk_device_create_cmd_itf(device, &cmd_cbs,
@@ -305,12 +309,14 @@ static void ctrl_disconnected(struct arsdk_device *device,
  */
 static void dev_send_status(struct arsdk_cmd_itf *itf,
 		const struct arsdk_cmd *cmd,
-		enum arsdk_cmd_itf_send_status status,
+		enum arsdk_cmd_buffer_type type,
+		enum arsdk_cmd_itf_cmd_send_status status,
+		uint16_t seq,
 		int done,
 		void *userdata)
 {
 	TST_LOG("cmd %u,%u,%u: %s%s", cmd->prj_id, cmd->cls_id, cmd->cmd_id,
-			arsdk_cmd_itf_send_status_str(status),
+			arsdk_cmd_itf_cmd_send_status_str(status),
 			done ? "(DONE)" : "");
 }
 
@@ -347,7 +353,7 @@ static void dev_connected(struct arsdk_peer *peer,
 	struct arsdk_cmd_itf_cbs cmd_cbs = {
 		.userdata = data,
 		.recv_cmd = &dev_recv_cmd,
-		.send_status = &dev_send_status,
+		.cmd_send_status = &dev_send_status,
 		.link_quality = &dev_link_quality,
 	};
 

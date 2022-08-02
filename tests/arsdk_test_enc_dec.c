@@ -150,6 +150,8 @@ static void test_enc_dec_void(void)
 
 	res = arsdk_cmd_dec(&cmd, &cmd_void);
 	CU_ASSERT_EQUAL(res, 0);
+
+	arsdk_cmd_clear(&cmd);
 }
 
 /** */
@@ -184,6 +186,8 @@ static void test_enc_dec_single_i8(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(i8dec, i8enc);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* test max */
 	i8enc = INT8_MAX;
 	res = arsdk_cmd_enc(&cmd, &cmd_single_i8, i8enc);
@@ -192,6 +196,8 @@ static void test_enc_dec_single_i8(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_i8, &i8dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(i8dec, INT8_MAX);
+
+	arsdk_cmd_clear(&cmd);
 
 	/* test 0 */
 	i8enc = 0;
@@ -202,6 +208,8 @@ static void test_enc_dec_single_i8(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(i8dec, 0);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* test -1 */
 	i8enc = -1;
 	res = arsdk_cmd_enc(&cmd, &cmd_single_i8, i8enc);
@@ -210,6 +218,8 @@ static void test_enc_dec_single_i8(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_i8, &i8dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(i8dec, -1);
+
+	arsdk_cmd_clear(&cmd);
 }
 
 /** */
@@ -244,6 +254,8 @@ static void test_enc_dec_single_u8(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(u8dec, u8enc);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* test max */
 	u8enc = UINT8_MAX;
 	res = arsdk_cmd_enc(&cmd, &cmd_single_u8, u8enc);
@@ -252,6 +264,8 @@ static void test_enc_dec_single_u8(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_u8, &u8dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(u8dec, UINT8_MAX);
+
+	arsdk_cmd_clear(&cmd);
 }
 
 /** */
@@ -286,6 +300,8 @@ static void test_enc_dec_single_i16(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(i16dec, INT16_MIN);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* test max */
 	i16enc = INT16_MAX;
 	res = arsdk_cmd_enc(&cmd, &cmd_single_i16, i16enc);
@@ -294,6 +310,8 @@ static void test_enc_dec_single_i16(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_i16, &i16dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(i16dec, INT16_MAX);
+
+	arsdk_cmd_clear(&cmd);
 
 	/* test 0 */
 	i16enc = 0;
@@ -304,6 +322,8 @@ static void test_enc_dec_single_i16(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(i16dec, 0);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* test -1 */
 	i16enc = -1;
 	res = arsdk_cmd_enc(&cmd, &cmd_single_i16, i16enc);
@@ -312,6 +332,8 @@ static void test_enc_dec_single_i16(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_i16, &i16dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(i16dec, -1);
+
+	arsdk_cmd_clear(&cmd);
 }
 
 /** */
@@ -346,6 +368,8 @@ static void test_enc_dec_single_u16(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(u16dec, 0);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* test max */
 	u16enc = UINT16_MAX;
 	res = arsdk_cmd_enc(&cmd, &cmd_single_u16, u16enc);
@@ -354,6 +378,8 @@ static void test_enc_dec_single_u16(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_u16, &u16dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(u16dec, UINT16_MAX);
+
+	arsdk_cmd_clear(&cmd);
 }
 
 /** */
@@ -388,6 +414,8 @@ static void test_enc_dec_single_i32(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(i32dec, INT32_MIN);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* test max */
 	i32enc = INT32_MAX;
 	res = arsdk_cmd_enc(&cmd, &cmd_single_i32, i32enc);
@@ -396,6 +424,8 @@ static void test_enc_dec_single_i32(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_i32, &i32dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(i32dec, INT32_MAX);
+
+	arsdk_cmd_clear(&cmd);
 
 	/* test 0 */
 	i32enc = 0;
@@ -406,6 +436,8 @@ static void test_enc_dec_single_i32(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(i32dec, 0);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* test -1 */
 	i32enc = -1;
 	res = arsdk_cmd_enc(&cmd, &cmd_single_i32, i32enc);
@@ -414,6 +446,8 @@ static void test_enc_dec_single_i32(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_i32, &i32dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(i32dec, -1);
+
+	arsdk_cmd_clear(&cmd);
 }
 
 /** */
@@ -448,6 +482,8 @@ static void test_enc_dec_single_u32(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(u32dec, 0);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* test max */
 	u32enc = UINT32_MAX;
 	res = arsdk_cmd_enc(&cmd, &cmd_single_u32, u32enc);
@@ -456,6 +492,8 @@ static void test_enc_dec_single_u32(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_u32, &u32dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(u32dec, UINT32_MAX);
+
+	arsdk_cmd_clear(&cmd);
 }
 
 /** */
@@ -490,6 +528,8 @@ static void test_enc_dec_single_i64(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(i64dec, INT64_MIN);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* test max */
 	i64enc = INT64_MAX;
 	res = arsdk_cmd_enc(&cmd, &cmd_single_i64, i64enc);
@@ -498,6 +538,8 @@ static void test_enc_dec_single_i64(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_i64, &i64dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(i64dec, INT64_MAX);
+
+	arsdk_cmd_clear(&cmd);
 
 	/* test 0 */
 	i64enc = 0;
@@ -508,6 +550,8 @@ static void test_enc_dec_single_i64(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(i64dec, 0);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* test -1 */
 	i64enc = -1;
 	res = arsdk_cmd_enc(&cmd, &cmd_single_i64, i64enc);
@@ -516,6 +560,8 @@ static void test_enc_dec_single_i64(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_i64, &i64dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(i64dec, -1);
+
+	arsdk_cmd_clear(&cmd);
 }
 
 /** */
@@ -550,6 +596,8 @@ static void test_enc_dec_single_u64(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(u64dec, 0);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* test max */
 	u64enc = UINT64_MAX;
 	res = arsdk_cmd_enc(&cmd, &cmd_single_u64, u64enc);
@@ -558,6 +606,8 @@ static void test_enc_dec_single_u64(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_u64, &u64dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(u64dec, UINT64_MAX);
+
+	arsdk_cmd_clear(&cmd);
 }
 
 /** */
@@ -591,6 +641,8 @@ static void test_enc_dec_single_float(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(val_dec, val_enc);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* Test min */
 	res = arsdk_cmd_enc(&cmd, &cmd_single_float, val_enc);
 	CU_ASSERT_EQUAL(res, 0);
@@ -598,6 +650,8 @@ static void test_enc_dec_single_float(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_float, &val_dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(val_dec, FLT_MIN);
+
+	arsdk_cmd_clear(&cmd);
 
 	/* Test max */
 	val_enc = FLT_MAX;
@@ -608,6 +662,8 @@ static void test_enc_dec_single_float(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(val_dec, FLT_MAX);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* Test 0 */
 	val_enc = 0;
 	res = arsdk_cmd_enc(&cmd, &cmd_single_float, val_enc);
@@ -616,6 +672,8 @@ static void test_enc_dec_single_float(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_float, &val_dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(val_dec, 0);
+
+	arsdk_cmd_clear(&cmd);
 
 	/* Test -1 */
 	val_enc = -1;
@@ -626,6 +684,8 @@ static void test_enc_dec_single_float(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(val_dec, -1);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* Test FLT_EPSILON */
 	val_enc = FLT_EPSILON;
 	res = arsdk_cmd_enc(&cmd, &cmd_single_float, val_enc);
@@ -634,6 +694,8 @@ static void test_enc_dec_single_float(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_float, &val_dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(val_dec, FLT_EPSILON);
+
+	arsdk_cmd_clear(&cmd);
 }
 
 /** */
@@ -668,6 +730,8 @@ static void test_enc_dec_single_double(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(double_dec, DBL_MIN);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* Test max */
 	double_enc = DBL_MAX;
 	res = arsdk_cmd_enc(&cmd, &cmd_single_double, double_enc);
@@ -676,6 +740,8 @@ static void test_enc_dec_single_double(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_double, &double_dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(double_dec, DBL_MAX);
+
+	arsdk_cmd_clear(&cmd);
 
 	/* Test 0 */
 	double_enc = 0;
@@ -686,6 +752,8 @@ static void test_enc_dec_single_double(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(double_dec, 0);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* Test -1 */
 	double_enc = -1;
 	res = arsdk_cmd_enc(&cmd, &cmd_single_double, double_enc);
@@ -695,6 +763,8 @@ static void test_enc_dec_single_double(void)
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(double_dec, -1);
 
+	arsdk_cmd_clear(&cmd);
+
 	/* Test DBL_EPSILON */
 	double_enc = DBL_EPSILON;
 	res = arsdk_cmd_enc(&cmd, &cmd_single_double, double_enc);
@@ -703,6 +773,8 @@ static void test_enc_dec_single_double(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_double, &double_dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(double_dec, DBL_EPSILON);
+
+	arsdk_cmd_clear(&cmd);
 }
 
 /** */
@@ -735,6 +807,8 @@ static void test_enc_dec_single_enum_max(void)
 	res = arsdk_cmd_dec(&cmd, &cmd_single_enum, &enum_dec);
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_EQUAL(enum_dec, enum_enc);
+
+	arsdk_cmd_clear(&cmd);
 }
 
 #define CMD_DEFAULT_SIZE_MAX 256
@@ -773,6 +847,8 @@ static void test_enc_dec_single_string_force_realloc(void)
 
 	CU_ASSERT_EQUAL(res, 0);
 	CU_ASSERT_STRING_EQUAL(str_dec, str_enc);
+
+	arsdk_cmd_clear(&cmd);
 }
 
 /** */
@@ -856,6 +932,8 @@ static void test_enc_dec_all_types(void)
 	CU_ASSERT_EQUAL(dbl_dec, dbl_enc);
 	CU_ASSERT_STRING_EQUAL(str_dec, str_enc);
 	CU_ASSERT_EQUAL(enum_dec, enum_enc);
+
+	arsdk_cmd_clear(&cmd);
 }
 
 /** */
@@ -909,6 +987,8 @@ static void test_enc_dec_bad_cmd(void)
 
 	res = arsdk_cmd_dec(&cmd, &cmd_b, &u32_dec, &i8_dec);
 	CU_ASSERT_EQUAL(res, -EINVAL);
+
+	arsdk_cmd_clear(&cmd);
 }
 
 /** */
@@ -993,6 +1073,8 @@ static void test_enc_dec_bad_buf(void)
 	cmd.buf = pomp_buffer_new(2);
 	res = arsdk_cmd_dec(&cmd, &cmd_a, &i8_dec, &u32_dec);
 	CU_ASSERT_EQUAL(res, -EINVAL);
+
+	arsdk_cmd_clear(&cmd);
 }
 
 /** */

@@ -37,9 +37,6 @@
 #include "arsdk_ephemeris_itf_priv.h"
 #include <libmux.h>
 
-/* Opening time out of the TCP proxy mux in milliseconds. */
-#define TCP_PROXY_TIMEOUT 20
-
 /**
  */
 const char *arsdk_device_type_to_fld(enum arsdk_device_type dev_type)
@@ -124,6 +121,7 @@ static void recv_data(struct arsdk_transport *transport,
 		const struct arsdk_transport_payload *payload,
 		void *userdata)
 {
+	int res;
 	struct arsdk_device *self = userdata;
 
 	switch (header->id) {
@@ -135,12 +133,19 @@ static void recv_data(struct arsdk_transport *transport,
 	case ARSDK_TRANSPORT_ID_D2C_CMD_ACK_BLE:
 	case ARSDK_TRANSPORT_ID_D2C_CMD_HIGHPRIO_ACK:
 	case ARSDK_TRANSPORT_ID_D2C_CMD_HIGHPRIO_ACK_BLE:
-		if (self->cmd_itf != NULL)
-			arsdk_cmd_itf_recv_data(self->cmd_itf, header, payload);
+		if (self->cmd_itf == NULL) {
+			ARSDK_LOGW("Frame lost id=%d seq=%d", header->id,
+					header->seq);
+			break;
+		}
+
+		res = arsdk_cmd_itf_recv_data(self->cmd_itf, header, payload);
+		if (res < 0)
+			ARSDK_LOG_ERRNO("arsdk_cmd_itf_recv_data", -res);
 		break;
 
 	default:
-		ARSDK_LOGW("Frame lost id=%d", header->id);
+		ARSDK_LOGW("Frame lost id=%d seq=%d", header->id, header->seq);
 		break;
 	}
 }
@@ -1055,7 +1060,7 @@ static void mux_proxy_resolution_failed_cb(struct mux_ip_proxy *self, int err,
 {
 	struct arsdk_device_tcp_proxy *proxy = userdata;
 
-	ARSDK_LOGW("tcp resolution failed err: %d", err);
+	ARSDK_LOG_ERRNO("tcp resolution failed", -err);
 
 	ARSDK_RETURN_IF_FAILED(proxy != NULL, -EINVAL);
 
@@ -1115,7 +1120,7 @@ int arsdk_device_create_tcp_proxy(struct arsdk_device *self,
 
 	res = resolution(&self->info, dev_type, &tmp_port, &res_host);
 	if (res < 0)
-		return res;
+		goto error;
 
 	if (mux == NULL) {
 		proxy->port = tmp_port;
@@ -1140,8 +1145,8 @@ int arsdk_device_create_tcp_proxy(struct arsdk_device *self,
 		mux_cbs.userdata = proxy;
 
 		/* Allocate mux channel */
-		res = mux_ip_proxy_new(mux, &mux_info, &mux_cbs,
-				TCP_PROXY_TIMEOUT, &proxy->mux_tcp_proxy);
+		res = mux_ip_proxy_new(mux, &mux_info, &mux_cbs, -1,
+				&proxy->mux_tcp_proxy);
 		if (res < 0) {
 			ARSDK_LOG_ERRNO("mux_ip_proxy_new", -res);
 			goto error;
