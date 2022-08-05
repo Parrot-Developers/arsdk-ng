@@ -155,7 +155,6 @@ static struct arsdk_updater_transport *get_tsprt(struct arsdk_updater_itf *itf,
 		else
 			return arsdk_updater_transport_ftp_get_parent(
 					itf->ftp_tsprt);
-	case ARSDK_BACKEND_TYPE_BLE:
 	case ARSDK_BACKEND_TYPE_UNKNOWN:
 	default:
 		return NULL;

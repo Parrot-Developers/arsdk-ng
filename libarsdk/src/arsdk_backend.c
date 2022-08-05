@@ -108,7 +108,6 @@ const char *arsdk_backend_type_str(enum arsdk_backend_type val)
 {
 	switch (val) {
 	case ARSDK_BACKEND_TYPE_NET: return "NET";
-	case ARSDK_BACKEND_TYPE_BLE: return "BLE";
 	case ARSDK_BACKEND_TYPE_MUX: return "MUX";
 	case ARSDK_BACKEND_TYPE_UNKNOWN: /* NO BREAK */
 	default: return "UNKNOWN";

@@ -182,7 +182,7 @@ struct arsdk_cmd_itf2 {
 	 * Map of last sequence numbers received for each reception
 	 * queue identifier.
 	 */
-	uint16_t                           recv_seq[UINT16_MAX+1];
+	uint16_t                           recv_seq[UINT8_MAX+1];
 
 	/** Link quality part. */
 	struct {
@@ -429,7 +429,6 @@ static struct queue *find_tx_queue(struct arsdk_cmd_itf2 *itf,
 	uint32_t i = 0;
 	const struct arsdk_cmd_desc *cmd_desc = NULL;
 	struct queue *queue = NULL;
-	enum arsdk_transport_data_type type = ARSDK_TRANSPORT_DATA_TYPE_UNKNOWN;
 	enum arsdk_cmd_buffer_type buffer_type = ARSDK_CMD_BUFFER_TYPE_INVALID;
 
 	/* Take buffer type from cmd if valid */
@@ -449,16 +448,24 @@ static struct queue *find_tx_queue(struct arsdk_cmd_itf2 *itf,
 	/* Search suitable queue */
 	for (i = 0; i < itf->tx_count; i++) {
 		queue = itf->tx_queues[i];
-		type = queue->info.type;
+		enum arsdk_transport_data_type qtype = queue->info.type;
+		uint8_t qid = queue->info.id;
 		switch (buffer_type) {
 		case ARSDK_CMD_BUFFER_TYPE_NON_ACK:
-			if (type == ARSDK_TRANSPORT_DATA_TYPE_NOACK)
+			if (qtype == ARSDK_TRANSPORT_DATA_TYPE_NOACK)
 				return queue;
 			break;
 
 		case ARSDK_CMD_BUFFER_TYPE_ACK:
 		case ARSDK_CMD_BUFFER_TYPE_HIGH_PRIO:
-			if (type == ARSDK_TRANSPORT_DATA_TYPE_WITHACK)
+			if (qtype == ARSDK_TRANSPORT_DATA_TYPE_WITHACK &&
+			    qid != ARSDK_TRANSPORT_ID_D2C_CMD_LOWPRIO)
+				return queue;
+			break;
+
+		case ARSDK_CMD_BUFFER_TYPE_LOW_PRIO:
+			if (qtype == ARSDK_TRANSPORT_DATA_TYPE_WITHACK &&
+			    qid == ARSDK_TRANSPORT_ID_D2C_CMD_LOWPRIO)
 				return queue;
 			break;
 
@@ -869,12 +876,13 @@ static void lnqlt_rx_update(struct arsdk_cmd_itf2 *self,
  *
  * @param self : command interface.
  * @param data_type : transport data type of the queue.
+ * @param queue_id : id of the queue.
  * @param frame_data : frame data to unpack.
  * @param len : lrame data length.
  * @return 0 in case of success, negative errno value in case of error.
  */
 static int unpack_cmds(struct arsdk_cmd_itf2 *self,
-		enum arsdk_transport_data_type data_type,
+		enum arsdk_transport_data_type data_type, uint8_t queue_id,
 		const void *frame_data, size_t frame_data_len)
 {
 	int res = 0;
@@ -911,7 +919,10 @@ static int unpack_cmds(struct arsdk_cmd_itf2 *self,
 			cmd.buffer_type = ARSDK_CMD_BUFFER_TYPE_HIGH_PRIO;
 			break;
 		case ARSDK_TRANSPORT_DATA_TYPE_WITHACK:
-			cmd.buffer_type = ARSDK_CMD_BUFFER_TYPE_ACK;
+			cmd.buffer_type =
+				queue_id == ARSDK_TRANSPORT_ID_D2C_CMD_LOWPRIO
+					? ARSDK_CMD_BUFFER_TYPE_LOW_PRIO
+					: ARSDK_CMD_BUFFER_TYPE_ACK;
 			break;
 		case ARSDK_TRANSPORT_DATA_TYPE_ACK:
 		case ARSDK_TRANSPORT_DATA_TYPE_UNKNOWN:
@@ -978,7 +989,7 @@ int arsdk_cmd_itf2_recv_data(struct arsdk_cmd_itf2 *self,
 
 	/* Unpack commands from the payload */
 	if (payload->cdata != NULL) {
-		res = unpack_cmds(self, header->type,
+		res = unpack_cmds(self, header->type, header->id,
 				payload->cdata, payload->len);
 	} else {
 		/* Frame has no raw data, but buffer */
@@ -986,7 +997,7 @@ int arsdk_cmd_itf2_recv_data(struct arsdk_cmd_itf2 *self,
 		const void *data = NULL;
 
 		pomp_buffer_get_cdata(payload->buf, &data, &len, NULL);
-		res = unpack_cmds(self, header->type, data, len);
+		res = unpack_cmds(self, header->type, header->id, data, len);
 	}
 
 	return res;

@@ -99,8 +99,7 @@ enum arsdk_link_status {
 enum arsdk_backend_type {
 	ARSDK_BACKEND_TYPE_UNKNOWN = -1,  /**< Unknown */
 	ARSDK_BACKEND_TYPE_NET = 0,       /**< Wifi/IP network */
-	ARSDK_BACKEND_TYPE_BLE = 1,       /**< Bluetooth low energy */
-	ARSDK_BACKEND_TYPE_MUX = 2,       /**< Mux (USB) */
+	ARSDK_BACKEND_TYPE_MUX = 1,       /**< Mux (USB) */
 };
 
 /** Publisher configuration */

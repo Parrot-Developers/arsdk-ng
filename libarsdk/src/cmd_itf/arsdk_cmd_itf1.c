@@ -312,7 +312,6 @@ static struct queue *find_tx_queue(struct arsdk_cmd_itf1 *self,
 	uint32_t i = 0;
 	const struct arsdk_cmd_desc *cmd_desc = NULL;
 	struct queue *queue = NULL;
-	enum arsdk_transport_data_type type = ARSDK_TRANSPORT_DATA_TYPE_UNKNOWN;
 	enum arsdk_cmd_buffer_type buffer_type = ARSDK_CMD_BUFFER_TYPE_INVALID;
 
 	/* Take buffer type from cmd if valid */
@@ -332,20 +331,28 @@ static struct queue *find_tx_queue(struct arsdk_cmd_itf1 *self,
 	/* Search suitable queue */
 	for (i = 0; i < self->tx_count; i++) {
 		queue = self->tx_queues[i];
-		type = queue->info.type;
+		enum arsdk_transport_data_type qtype = queue->info.type;
+		uint8_t qid = queue->info.id;
 		switch (buffer_type) {
 		case ARSDK_CMD_BUFFER_TYPE_NON_ACK:
-			if (type == ARSDK_TRANSPORT_DATA_TYPE_NOACK)
+			if (qtype == ARSDK_TRANSPORT_DATA_TYPE_NOACK)
 				return queue;
 			break;
 
 		case ARSDK_CMD_BUFFER_TYPE_ACK:
-			if (type == ARSDK_TRANSPORT_DATA_TYPE_WITHACK)
+			if (qtype == ARSDK_TRANSPORT_DATA_TYPE_WITHACK &&
+			    qid != ARSDK_TRANSPORT_ID_D2C_CMD_LOWPRIO)
+				return queue;
+			break;
+
+		case ARSDK_CMD_BUFFER_TYPE_LOW_PRIO:
+			if (qtype == ARSDK_TRANSPORT_DATA_TYPE_WITHACK &&
+			    qid == ARSDK_TRANSPORT_ID_D2C_CMD_LOWPRIO)
 				return queue;
 			break;
 
 		case ARSDK_CMD_BUFFER_TYPE_HIGH_PRIO:
-			if (type == ARSDK_TRANSPORT_DATA_TYPE_WITHACK &&
+			if (qtype == ARSDK_TRANSPORT_DATA_TYPE_WITHACK &&
 			    queue->info.default_max_retry_count == INT32_MAX)
 				return queue;
 			break;
@@ -795,8 +802,11 @@ int arsdk_cmd_itf1_recv_data(struct arsdk_cmd_itf1 *self,
 		cmd.buffer_type = ARSDK_CMD_BUFFER_TYPE_HIGH_PRIO;
 	break;
 	case ARSDK_TRANSPORT_DATA_TYPE_WITHACK:
-		cmd.buffer_type = ARSDK_CMD_BUFFER_TYPE_ACK;
-	break;
+		cmd.buffer_type =
+			header->id == ARSDK_TRANSPORT_ID_D2C_CMD_LOWPRIO
+				? ARSDK_CMD_BUFFER_TYPE_LOW_PRIO
+				: ARSDK_CMD_BUFFER_TYPE_ACK;
+		break;
 	case ARSDK_TRANSPORT_DATA_TYPE_ACK:
 	case ARSDK_TRANSPORT_DATA_TYPE_UNKNOWN:
 	default:

@@ -127,6 +127,27 @@ struct arsdk_cmd_desc s_cmd_ack_desc3 = {
 	.arg_desc_count = 1,
 };
 
+struct arsdk_cmd_desc s_cmd_lowprio_desc1 = {
+	.name = "cmd4_lowprio",
+	.prj_id = 1,
+	.cls_id = 2,
+	.cmd_id = 4,
+	.list_type = ARSDK_CMD_LIST_TYPE_NONE,
+	.buffer_type = ARSDK_CMD_BUFFER_TYPE_LOW_PRIO,
+	.timeout_policy = ARSDK_CMD_TIMEOUT_POLICY_RETRY,
+
+	.arg_desc_table = (const struct arsdk_arg_desc[1]) {
+		{
+			"arg1",
+			ARSDK_ARG_TYPE_STRING,
+
+			NULL,
+			0,
+		}
+	},
+	.arg_desc_count = 1,
+};
+
 static void send_status_cb (struct arsdk_cmd_itf *itf,
 		const struct arsdk_cmd *cmd,
 		enum arsdk_cmd_buffer_type type,
@@ -520,6 +541,50 @@ static void test_cmd_itf_net_problematic_ack_msg(void)
 	}
 }
 
+
+static void test_cmd_itf_net_ack_lowprio_msg(void)
+{
+	TST_LOG("%s", __func__);
+
+	memset(&s_data, 0, sizeof(s_data));
+
+	struct test_cmd_info cmds[] = {
+		{
+			.desc = s_cmd_ack_desc1,
+
+			.msg_size = 4 * 1024,
+			.msg_cnt = 3,
+		},
+
+		{
+			.desc = s_cmd_ack_desc2,
+
+			.msg_size = 30,
+			.msg_cnt = 3,
+		},
+
+		{
+			.desc = s_cmd_lowprio_desc1,
+
+			.msg_size = 4 * 1024,
+			.msg_cnt = 3,
+		},
+	};
+
+	s_data.cmds = cmds;
+	s_data.cmds_cnt = 3;
+
+	test_run(ARSDK_BACKEND_TYPE_NET);
+
+	/* checks */
+
+	size_t i;
+	for (i = 0; i < s_data.cmds_cnt; i++) {
+		CU_ASSERT_EQUAL(s_data.cmds[i].sent_cnt, s_data.cmds[i].msg_cnt);
+		CU_ASSERT_EQUAL(s_data.cmds[i].recv_cnt, s_data.cmds[i].msg_cnt);
+	}
+}
+
 /* mux */
 
 static void test_cmd_itf_mux_large_ack_msg(void)
@@ -605,6 +670,7 @@ static CU_TestInfo s_cmd_itf_tests[] = {
 	{(char *)"cmd_itf_mux_large_ack_msg", &test_cmd_itf_mux_large_ack_msg},
 	{(char *)"cmd_itf_mux_multi_ack_msg", &test_cmd_itf_mux_multi_ack_msg},
 	{(char *)"cmd_itf_net_problematic_ack_msg", &test_cmd_itf_net_problematic_ack_msg},
+	{(char *)"cmd_itf_net_ack_lowprio_msg", &test_cmd_itf_net_ack_lowprio_msg},
 	CU_TEST_INFO_NULL,
 };
 

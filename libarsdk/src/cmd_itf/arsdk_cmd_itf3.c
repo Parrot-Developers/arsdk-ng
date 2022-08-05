@@ -139,6 +139,8 @@ struct queue {
 	uint32_t                     tail;
 	/** Last sequence number used to send. */
 	uint16_t                     seq;
+	/** Last sending time. */
+	struct timespec              last_sent_ts;
 	/** Command pack. */
 	struct {
 		/** Data buffer. */
@@ -199,9 +201,12 @@ struct arsdk_cmd_itf3 {
 	 * Map of last sequence numbers received for each reception
 	 * queue identifier.
 	 */
-	uint16_t                           recv_seq[UINT16_MAX+1];
+	uint16_t                           recv_seq[UINT8_MAX+1];
 
-	struct pomp_buffer *partial_cmd_buf;
+	/**
+	 * Map of partial command received for each reception queue identifier.
+	 */
+	struct pomp_buffer *partial_cmd_buf[UINT8_MAX+1];
 
 	/** Link quality part. */
 	struct {
@@ -254,7 +259,7 @@ static void entry_clear(struct entry *entry)
 }
 
 static enum arsdk_cmd_buffer_type data_type_to_buffer_type(
-		enum arsdk_transport_data_type val)
+		enum arsdk_transport_data_type val, uint8_t queue_id)
 {
 	switch (val) {
 	case ARSDK_TRANSPORT_DATA_TYPE_NOACK:
@@ -262,7 +267,9 @@ static enum arsdk_cmd_buffer_type data_type_to_buffer_type(
 	case ARSDK_TRANSPORT_DATA_TYPE_LOWLATENCY:
 		return ARSDK_CMD_BUFFER_TYPE_HIGH_PRIO;
 	case ARSDK_TRANSPORT_DATA_TYPE_WITHACK:
-		return ARSDK_CMD_BUFFER_TYPE_ACK;
+		return queue_id == ARSDK_TRANSPORT_ID_D2C_CMD_LOWPRIO
+			? ARSDK_CMD_BUFFER_TYPE_LOW_PRIO
+			: ARSDK_CMD_BUFFER_TYPE_ACK;
 	case ARSDK_TRANSPORT_DATA_TYPE_ACK:
 	case ARSDK_TRANSPORT_DATA_TYPE_UNKNOWN:
 	default:
@@ -275,14 +282,14 @@ static enum arsdk_cmd_buffer_type data_type_to_buffer_type(
 /**
  */
 static void entry_send_notify(struct entry *entry, struct arsdk_cmd_itf3 *self,
-		enum arsdk_transport_data_type type,
+		enum arsdk_transport_data_type type, uint8_t queue_id,
 		enum arsdk_cmd_itf_cmd_send_status send_status,
 		uint16_t seq, int done)
 {
 	/* Notify cmd callback */
 	if (entry->cmd_send_status != NULL) {
 		(*entry->cmd_send_status)(self->itf, &entry->cmd,
-				data_type_to_buffer_type(type),
+				data_type_to_buffer_type(type, queue_id),
 				send_status, seq, done,
 				entry->userdata);
 	}
@@ -291,14 +298,15 @@ static void entry_send_notify(struct entry *entry, struct arsdk_cmd_itf3 *self,
 /**
  */
 static void pack_send_notify(struct arsdk_cmd_itf3 *self,
-		uint16_t seq, enum arsdk_transport_data_type type, size_t len,
+		uint16_t seq, enum arsdk_transport_data_type type,
+		uint8_t queue_id, size_t len,
 		enum arsdk_cmd_itf_pack_send_status send_status,
 		uint32_t sent_count)
 {
 	/* Notify pack callback */
 	if (self->itf_cbs.pack_send_status != NULL) {
 		(*self->itf_cbs.pack_send_status)(self->itf, seq,
-				data_type_to_buffer_type(type), len,
+				data_type_to_buffer_type(type, queue_id), len,
 				send_status, sent_count,
 				self->itf_cbs.userdata);
 	}
@@ -307,13 +315,14 @@ static void pack_send_notify(struct arsdk_cmd_itf3 *self,
 /**
  */
 static void pack_recv_notify(struct arsdk_cmd_itf3 *self,
-		uint16_t seq, enum arsdk_transport_data_type type, size_t len,
+		uint16_t seq, enum arsdk_transport_data_type type,
+		uint8_t queue_id, size_t len,
 		enum arsdk_cmd_itf_pack_recv_status recv_status)
 {
 	/* Notify pack callback */
 	if (self->itf_cbs.pack_recv_status != NULL) {
 		(*self->itf_cbs.pack_recv_status)(self->itf, seq,
-				data_type_to_buffer_type(type), len,
+				data_type_to_buffer_type(type, queue_id), len,
 				recv_status, self->itf_cbs.userdata);
 	}
 }
@@ -335,8 +344,7 @@ static int queue_new(const struct arsdk_cmd_queue_info *info,
 	/* Initialize structure */
 	memcpy(&queue->info, info, sizeof(*info));
 
-	/* Force infinite retry, as soon as possible without overwriting. */
-	queue->info.max_tx_rate_ms = 0;
+	/* Force infinite retry, without overwriting. */
 	queue->info.overwrite = 0;
 	queue->info.default_max_retry_count = -1;
 
@@ -369,7 +377,8 @@ static void queue_stop(struct queue *queue, struct arsdk_cmd_itf3 *itf)
 		size_t len;
 		pomp_buffer_get_cdata(queue->pack.buf, NULL, &len, NULL);
 
-		pack_send_notify(itf, queue->pack.seq, queue->info.type, len,
+		pack_send_notify(itf, queue->pack.seq, queue->info.type,
+				queue->info.id, len,
 				ARSDK_CMD_ITF_PACK_SEND_STATUS_CANCELED, 0);
 	}
 
@@ -377,7 +386,7 @@ static void queue_stop(struct queue *queue, struct arsdk_cmd_itf3 *itf)
 	pos = queue->head;
 	for (i = 0; i < queue->count; i++) {
 		entry = &queue->entries[pos];
-		entry_send_notify(entry, itf, queue->info.type,
+		entry_send_notify(entry, itf, queue->info.type, queue->info.id,
 				ARSDK_CMD_ITF_CMD_SEND_STATUS_CANCELED, 0, 1);
 		entry_clear(entry);
 
@@ -544,6 +553,7 @@ static void queue_pack_cmds(struct arsdk_cmd_itf3 *self, struct queue *queue)
 		entry_send_notify(entry,
 				  self,
 				  queue->info.type,
+				  queue->info.id,
 				  status,
 				  queue->seq,
 				  done);
@@ -562,7 +572,6 @@ static struct queue *find_tx_queue(struct arsdk_cmd_itf3 *itf,
 	uint32_t i = 0;
 	const struct arsdk_cmd_desc *cmd_desc = NULL;
 	struct queue *queue = NULL;
-	enum arsdk_transport_data_type type = ARSDK_TRANSPORT_DATA_TYPE_UNKNOWN;
 	enum arsdk_cmd_buffer_type buffer_type = ARSDK_CMD_BUFFER_TYPE_INVALID;
 
 	/* Take buffer type from cmd if valid */
@@ -582,16 +591,24 @@ static struct queue *find_tx_queue(struct arsdk_cmd_itf3 *itf,
 	/* Search suitable queue */
 	for (i = 0; i < itf->tx_count; i++) {
 		queue = itf->tx_queues[i];
-		type = queue->info.type;
+		enum arsdk_transport_data_type qtype = queue->info.type;
+		uint8_t qid = queue->info.id;
 		switch (buffer_type) {
 		case ARSDK_CMD_BUFFER_TYPE_NON_ACK:
-			if (type == ARSDK_TRANSPORT_DATA_TYPE_NOACK)
+			if (qtype == ARSDK_TRANSPORT_DATA_TYPE_NOACK)
 				return queue;
 			break;
 
 		case ARSDK_CMD_BUFFER_TYPE_ACK:
 		case ARSDK_CMD_BUFFER_TYPE_HIGH_PRIO:
-			if (type == ARSDK_TRANSPORT_DATA_TYPE_WITHACK)
+			if (qtype == ARSDK_TRANSPORT_DATA_TYPE_WITHACK &&
+			    qid != ARSDK_TRANSPORT_ID_D2C_CMD_LOWPRIO)
+				return queue;
+			break;
+
+		case ARSDK_CMD_BUFFER_TYPE_LOW_PRIO:
+			if (qtype == ARSDK_TRANSPORT_DATA_TYPE_WITHACK &&
+			    qid == ARSDK_TRANSPORT_ID_D2C_CMD_LOWPRIO)
 				return queue;
 			break;
 
@@ -658,6 +675,28 @@ again:
 		self->lnqlt.retry_count++;
 	}
 
+	/* If delay between tx is not passed, compute next time of check */
+	if (queue->info.max_tx_rate_ms > 0 && time_timespec_diff_in_range(
+			&queue->last_sent_ts,
+			tsnow,
+			(uint64_t)queue->info.max_tx_rate_ms * 1000,
+			&diff_us)) {
+		/* Still need to wait before sending */
+		diff_ms = (int)(diff_us / 1000);
+		remaining_ms = queue->info.max_tx_rate_ms - diff_ms;
+
+		/* If the remaining time is less than a milisecond,
+		   send the pack now. We should NEVER set next_timeout_ms
+		   to zero here, as it would deactivate the pomp_timer
+		*/
+		if (remaining_ms > 0) {
+			if (*next_timeout_ms < 0 ||
+			    remaining_ms < *next_timeout_ms)
+				*next_timeout_ms = remaining_ms;
+			return;
+		}
+	}
+
 	/* If it is not a retry, increment the sequence number and
 	   pack new commands to send. */
 	if (queue->pack.cmd_count == 0) {
@@ -687,14 +726,15 @@ again:
 	}
 
 	/* Notify pack sent */
-	pack_send_notify(self, header.seq, queue->info.type, len,
-			ARSDK_CMD_ITF_PACK_SEND_STATUS_SENT,
+	pack_send_notify(self, header.seq, queue->info.type, queue->info.id,
+			len, ARSDK_CMD_ITF_PACK_SEND_STATUS_SENT,
 			queue->pack.sent_count + 1);
 	if (queue->pack.sent_count == 100) {
 		ARSDK_LOG_EVT("ARSDK",
 			      "event='too_many_retries',max_pack_size=%d,current_pack_size=%zu",
 			      ARSDK_PACK_MAX_SIZE, len);
 	}
+	queue->last_sent_ts = *tsnow;
 
 	if (queue->info.type == ARSDK_TRANSPORT_DATA_TYPE_WITHACK) {
 		queue->pack.seq = header.seq;
@@ -792,7 +832,7 @@ static void recv_ack(struct arsdk_cmd_itf3 *self,
 
 			/* Notify pack ack received */
 			pack_send_notify(self, seq, queue->info.type,
-				payload->len,
+				queue->info.id, payload->len,
 				ARSDK_CMD_ITF_PACK_SEND_STATUS_ACK_RECEIVED,
 				queue->last_pack.ack_count);
 
@@ -812,7 +852,7 @@ static void recv_ack(struct arsdk_cmd_itf3 *self,
 
 			/* Notify pack ack received */
 			pack_send_notify(self, seq, queue->info.type,
-				payload->len,
+				queue->info.id, payload->len,
 				ARSDK_CMD_ITF_PACK_SEND_STATUS_ACK_RECEIVED,
 				0);
 			return;
@@ -831,7 +871,8 @@ static void recv_ack(struct arsdk_cmd_itf3 *self,
 		self->lnqlt.ack_count++;
 
 		/* Notify pack ack received */
-		pack_send_notify(self, seq, queue->info.type, payload->len,
+		pack_send_notify(self, seq, queue->info.type, queue->info.id,
+			payload->len,
 			ARSDK_CMD_ITF_PACK_SEND_STATUS_ACK_RECEIVED, 1);
 
 		/* notify and pop each command completely send of the pack */
@@ -841,6 +882,7 @@ static void recv_ack(struct arsdk_cmd_itf3 *self,
 		for (entry_i = 0; entry_i < cmd_count; entry_i++) {
 			entry = &queue->entries[queue->head];
 			entry_send_notify(entry, self, queue->info.type,
+				queue->info.id,
 				ARSDK_CMD_ITF_CMD_SEND_STATUS_ACK_RECEIVED,
 				seq, 1);
 			queue_pop(queue);
@@ -886,7 +928,7 @@ static int send_ack(struct arsdk_cmd_itf3 *self, uint8_t id, uint16_t seq)
 
 	/* Notify pack acknowledge sent, force type to data with ack since
 	 * we will never send an acknowledge for non-ack data */
-	pack_recv_notify(self, seq, ARSDK_TRANSPORT_DATA_TYPE_WITHACK,
+	pack_recv_notify(self, seq, ARSDK_TRANSPORT_DATA_TYPE_WITHACK, id,
 			sizeof(seq), ARSDK_CMD_ITF_PACK_RECV_STATUS_ACK_SENT);
 	return res;
 }
@@ -1043,12 +1085,13 @@ static void lnqlt_rx_update(struct arsdk_cmd_itf3 *self,
  *
  * @param self : command interface.
  * @param data_type : transport data type of the queue.
+ * @param queue_id : id of the queue.
  * @param payload_data : payload data to unpack.
  * @param payload_len : payload length.
  * @return 0 in case of success, negative errno value in case of error.
  */
 static int unpack_cmds(struct arsdk_cmd_itf3 *self,
-		enum arsdk_transport_data_type data_type,
+		enum arsdk_transport_data_type data_type, uint8_t queue_id,
 		const void *payload_data, size_t payload_len)
 {
 	int res = 0;
@@ -1068,10 +1111,11 @@ static int unpack_cmds(struct arsdk_cmd_itf3 *self,
 	while (data < data_end) {
 		data_len = data_end - data;
 		if (data_type == ARSDK_TRANSPORT_DATA_TYPE_WITHACK &&
-		    data == payload_data && self->partial_cmd_buf != NULL) {
+		    data == payload_data &&
+		    self->partial_cmd_buf[queue_id] != NULL) {
 			/* It is the following of a partial command. */
-			buf = self->partial_cmd_buf;
-			self->partial_cmd_buf = NULL;
+			buf = self->partial_cmd_buf[queue_id];
+			self->partial_cmd_buf[queue_id] = NULL;
 
 			res = pomp_buffer_get_cdata(buf, NULL, &cmd_rcv_len,
 					&cmd_size);
@@ -1124,7 +1168,7 @@ static int unpack_cmds(struct arsdk_cmd_itf3 *self,
 		if (is_partial_cmd) {
 			/* It is a partial command
 			   save the buffer and wait for the continuation. */
-			self->partial_cmd_buf = buf;
+			self->partial_cmd_buf[queue_id] = buf;
 			return res;
 		}
 
@@ -1132,7 +1176,7 @@ static int unpack_cmds(struct arsdk_cmd_itf3 *self,
 		arsdk_cmd_init_with_buf(&cmd, buf);
 
 		/* Set arsdk_cmd buffer type from transport data type */
-		cmd.buffer_type = data_type_to_buffer_type(data_type);
+		cmd.buffer_type = data_type_to_buffer_type(data_type, queue_id);
 
 		/* Try to decode header of command, Notify reception */
 		res = arsdk_cmd_dec_header(&cmd);
@@ -1195,17 +1239,17 @@ int arsdk_cmd_itf3_recv_data(struct arsdk_cmd_itf3 *self,
 	/* If the sequence number was already handled, stop processing here */
 	if (!should_process_data(self, header->id, header->seq)) {
 		/* Notify pack drop */
-		pack_recv_notify(self, header->seq, header->type, len,
-				ARSDK_CMD_ITF_PACK_RECV_STATUS_IGNORED);
+		pack_recv_notify(self, header->seq, header->type, header->id,
+				len, ARSDK_CMD_ITF_PACK_RECV_STATUS_IGNORED);
 		return 0;
 	}
 
 	/* Notify pack received */
-	pack_recv_notify(self, header->seq, header->type, len,
+	pack_recv_notify(self, header->seq, header->type, header->id, len,
 			ARSDK_CMD_ITF_PACK_RECV_STATUS_PROCESSED);
 
 	/* Unpack commands from the payload */
-	return unpack_cmds(self, header->type, data, len);
+	return unpack_cmds(self, header->type, header->id, data, len);
 }
 
 /**

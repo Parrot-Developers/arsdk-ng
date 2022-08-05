@@ -1793,7 +1793,6 @@ static void backend_create(struct app *app)
 			LOG_ERRNO("arsdk_discovery_mux_start", -res);
 		break;
 
-	case ARSDK_BACKEND_TYPE_BLE: /* NO BREAK */
 	case ARSDK_BACKEND_TYPE_UNKNOWN: /* NO BREAK */
 	default:
 		LOGW("Unsupported backend: %s",

@@ -337,8 +337,6 @@ static int resolution(struct arsdk_ftp_itf *itf,
 		else
 			*host = "drone";
 		return 0;
-	case ARSDK_BACKEND_TYPE_BLE:
-		return -EPERM;
 	case ARSDK_BACKEND_TYPE_UNKNOWN:
 	default:
 		return -EINVAL;

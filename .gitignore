@@ -30,3 +30,5 @@ examples/android/build/
 *.d
 *.so
 
+# vscode settings
+.vscode/

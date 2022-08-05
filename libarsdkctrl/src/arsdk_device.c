@@ -121,33 +121,17 @@ static void recv_data(struct arsdk_transport *transport,
 		const struct arsdk_transport_payload *payload,
 		void *userdata)
 {
-	int res;
 	struct arsdk_device *self = userdata;
 
-	switch (header->id) {
-	case ARSDK_TRANSPORT_ID_D2C_CMD_NOACK:
-	case ARSDK_TRANSPORT_ID_D2C_CMD_NOACK_BLE:
-	case ARSDK_TRANSPORT_ID_D2C_CMD_WITHACK:
-	case ARSDK_TRANSPORT_ID_D2C_CMD_WITHACK_BLE:
-	case ARSDK_TRANSPORT_ID_D2C_CMD_ACK:
-	case ARSDK_TRANSPORT_ID_D2C_CMD_ACK_BLE:
-	case ARSDK_TRANSPORT_ID_D2C_CMD_HIGHPRIO_ACK:
-	case ARSDK_TRANSPORT_ID_D2C_CMD_HIGHPRIO_ACK_BLE:
-		if (self->cmd_itf == NULL) {
-			ARSDK_LOGW("Frame lost id=%d seq=%d", header->id,
-					header->seq);
-			break;
-		}
-
-		res = arsdk_cmd_itf_recv_data(self->cmd_itf, header, payload);
-		if (res < 0)
-			ARSDK_LOG_ERRNO("arsdk_cmd_itf_recv_data", -res);
-		break;
-
-	default:
+	if (self->cmd_itf == NULL ||
+	    header->id < ARSDK_TRANSPORT_ID_CMD_MIN) {
 		ARSDK_LOGW("Frame lost id=%d seq=%d", header->id, header->seq);
-		break;
+		return;
 	}
+
+	int res = arsdk_cmd_itf_recv_data(self->cmd_itf, header, payload);
+	if (res < 0)
+		ARSDK_LOG_ERRNO("arsdk_cmd_itf_recv_data", -res);
 }
 
 /**
@@ -585,48 +569,11 @@ static const struct arsdk_cmd_queue_info s_tx_info_table[] = {
 		.default_max_retry_count = 5,
 		.overwrite = 0,
 	},
-	{
-		.type = ARSDK_TRANSPORT_DATA_TYPE_WITHACK,
-		.id = ARSDK_TRANSPORT_ID_C2D_CMD_HIGHPRIO,
-		.max_tx_rate_ms = 0,
-		.ack_timeout_ms = 150,
-		.default_max_retry_count = INT32_MAX,
-		.overwrite = 0,
-	},
-};
-
-static const struct arsdk_cmd_queue_info s_tx_info_table_ble[] = {
-{
-		.type = ARSDK_TRANSPORT_DATA_TYPE_NOACK,
-		.id = ARSDK_TRANSPORT_ID_C2D_CMD_NOACK,
-		.max_tx_rate_ms = 0,
-		.ack_timeout_ms = -1,
-		.default_max_retry_count = -1,
-		.overwrite = 1,
-	},
-	{
-		.type = ARSDK_TRANSPORT_DATA_TYPE_WITHACK,
-		.id = ARSDK_TRANSPORT_ID_C2D_CMD_WITHACK,
-		.max_tx_rate_ms = 50,
-		.ack_timeout_ms = 750,
-		.default_max_retry_count = 5,
-		.overwrite = 0,
-	},
-	{
-		.type = ARSDK_TRANSPORT_DATA_TYPE_WITHACK,
-		.id = ARSDK_TRANSPORT_ID_C2D_CMD_HIGHPRIO,
-		.max_tx_rate_ms = 0,
-		.ack_timeout_ms = 150,
-		.default_max_retry_count = INT32_MAX,
-		.overwrite = 0,
-	},
 };
 
 /** */
 static const uint32_t s_tx_count =
 		sizeof(s_tx_info_table) / sizeof(s_tx_info_table[0]);
-static const uint32_t s_tx_count_ble =
-		sizeof(s_tx_info_table_ble) / sizeof(s_tx_info_table_ble[0]);
 
 /**
  */
@@ -637,9 +584,6 @@ int arsdk_device_create_cmd_itf(
 {
 	int res = 0;
 	struct arsdk_cmd_itf_internal_cbs internal_cbs;
-	uint8_t ackoff = 0;
-	const struct arsdk_cmd_queue_info *tx_info_table = NULL;
-	uint32_t tx_count = 0;
 
 	ARSDK_RETURN_ERR_IF_FAILED(ret_itf != NULL, -EINVAL);
 	*ret_itf = NULL;
@@ -653,18 +597,6 @@ int arsdk_device_create_cmd_itf(
 	if (self->cmd_itf != NULL)
 		return -EBUSY;
 
-	/* Determine parameters depending on backend type */
-	if (arsdkctrl_backend_get_type(self->backend) ==
-			ARSDK_BACKEND_TYPE_BLE) {
-		tx_info_table = &s_tx_info_table_ble[0];
-		tx_count = s_tx_count_ble;
-		ackoff = ARSDK_TRANSPORT_ID_ACKOFF_BLE;
-	} else {
-		tx_info_table = &s_tx_info_table[0];
-		tx_count = s_tx_count;
-		ackoff = ARSDK_TRANSPORT_ID_ACKOFF;
-	}
-
 	/* Create command interface */
 	memset(&internal_cbs, 0, sizeof(internal_cbs));
 	internal_cbs.userdata = self;
@@ -672,8 +604,8 @@ int arsdk_device_create_cmd_itf(
 	res = arsdk_cmd_itf_new(
 			self->transport,
 			cbs, &internal_cbs,
-			tx_info_table, tx_count, ackoff,
-			ret_itf);
+			&s_tx_info_table[0], s_tx_count,
+			ARSDK_TRANSPORT_ID_ACKOFF, ret_itf);
 	if (res == 0) {
 		/* Keep it */
 		self->cmd_itf = *ret_itf;
@@ -1015,8 +947,6 @@ static int resolution(struct arsdk_device_info *dev_info,
 		else
 			*host = "drone";
 		return 0;
-	case ARSDK_BACKEND_TYPE_BLE:
-		return -EPERM;
 	case ARSDK_BACKEND_TYPE_UNKNOWN:
 	default:
 		return -EINVAL;

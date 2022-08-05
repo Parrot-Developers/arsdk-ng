@@ -38,6 +38,7 @@ enum arsdk_cmd_buffer_type {
 	ARSDK_CMD_BUFFER_TYPE_NON_ACK,
 	ARSDK_CMD_BUFFER_TYPE_ACK,
 	ARSDK_CMD_BUFFER_TYPE_HIGH_PRIO,
+	ARSDK_CMD_BUFFER_TYPE_LOW_PRIO,
 };
 
 enum arsdk_cmd_timeout_policy {
