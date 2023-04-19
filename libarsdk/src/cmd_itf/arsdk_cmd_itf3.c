@@ -731,7 +731,7 @@ again:
 			queue->pack.sent_count + 1);
 	if (queue->pack.sent_count == 100) {
 		ARSDK_LOG_EVT("ARSDK",
-			      "event='too_many_retries',max_pack_size=%d,current_pack_size=%zu",
+			      "event='too_many_retries';max_pack_size=%d;current_pack_size=%zu",
 			      ARSDK_PACK_MAX_SIZE, len);
 	}
 	queue->last_sent_ts = *tsnow;

@@ -99,6 +99,10 @@ def _get_max_args_count(ctx):
 #===============================================================================
 #===============================================================================
 def gen_ids_h(ctx, out):
+    # Include guard
+    out.write("#ifndef ARSDK_IDS_H_\n")
+    out.write("#define ARSDK_IDS_H_\n\n")
+
     # Feature Ids
     if len(ctx.features) != 0:
         out.write("enum {\n")
@@ -173,9 +177,16 @@ def gen_ids_h(ctx, out):
                         featureId << 24 | msgId)
     out.write("};\n\n")
 
+    # Include guard
+    out.write("\n#endif /* ARSDK_IDS_H_ */\n")
+
 #===============================================================================
 #===============================================================================
 def gen_enums_h(ctx, out):
+    # Include guard
+    out.write("#ifndef ARSDK_ENUMS_H_\n")
+    out.write("#define ARSDK_ENUMS_H_\n\n")
+
     for featureId in sorted(ctx.featuresById.keys()):
         featureObj = ctx.featuresById[featureId]
         for enum in featureObj.enums:
@@ -192,9 +203,16 @@ def gen_enums_h(ctx, out):
                       _to_c_enum(enum.name),
                       len(enum.values))
 
+    # Include guard
+    out.write("\n#endif /* ARSDK_ENUMS_H_ */\n")
+
 #===============================================================================
 #===============================================================================
 def gen_cmd_desc_h(ctx, out):
+    # Include guard
+    out.write("#ifndef ARSDK_CMD_DESC_H_\n")
+    out.write("#define ARSDK_CMD_DESC_H_\n\n")
+
     out.write("#define ARSDK_MAX_ARGS_COUNT %d\n", _get_max_args_count(ctx))
 
     for featureId in sorted(ctx.featuresById.keys()):
@@ -215,6 +233,9 @@ def gen_cmd_desc_h(ctx, out):
                         _to_c_name(featureObj.name),
                         _to_c_name(msgObj.name))
     out.write("extern ARSDK_API const struct arsdk_cmd_desc * const * const *g_arsdk_cmd_desc_table[];\n")
+
+    # Include guard
+    out.write("\n#endif /* ARSDK_CMD_DESC_H_ */\n")
 
 #===============================================================================
 #===============================================================================
@@ -402,6 +423,10 @@ def gen_cmd_desc_c(ctx, out):
 #===============================================================================
 #===============================================================================
 def gen_cmd_dec_h(ctx, out):
+    # Include guard
+    out.write("#ifndef ARSDK_CMD_DEC_H_\n")
+    out.write("#define ARSDK_CMD_DEC_H_\n\n")
+
     for featureId in sorted(ctx.featuresById.keys()):
         featureObj = ctx.featuresById[featureId]
 
@@ -441,6 +466,9 @@ def gen_cmd_dec_h(ctx, out):
             out.write(");\n")
             out.write("}\n\n")
 
+    # Include guard
+    out.write("\n#endif /* ARSDK_CMD_DEC_H_ */\n")
+
 #===============================================================================
 #===============================================================================
 def gen_cmd_dec_c(ctx, out):
@@ -455,6 +483,10 @@ def gen_cmd_dec_c(ctx, out):
 #===============================================================================
 #===============================================================================
 def gen_cmd_enc_h(ctx, out):
+    # Include guard
+    out.write("#ifndef ARSDK_CMD_ENC_H_\n")
+    out.write("#define ARSDK_CMD_ENC_H_\n\n")
+
     for featureId in sorted(ctx.featuresById.keys()):
         featureObj = ctx.featuresById[featureId]
         for msgObj in featureObj.getMsgs():
@@ -492,6 +524,9 @@ def gen_cmd_enc_h(ctx, out):
                 out.write(");\n")
                 out.write("}\n\n")
 
+    # Include guard
+    out.write("\n#endif /* ARSDK_CMD_ENC_H_ */\n")
+
 #===============================================================================
 #===============================================================================
 def gen_cmd_enc_c(ctx, out):
@@ -503,6 +538,10 @@ def gen_cmd_enc_c(ctx, out):
 #===============================================================================
 #===============================================================================
 def gen_cmd_send_h(ctx, out):
+    # Include guard
+    out.write("#ifndef ARSDK_CMD_SEND_H_\n")
+    out.write("#define ARSDK_CMD_SEND_H_\n\n")
+
     for featureId in sorted(ctx.featuresById.keys()):
         featureObj = ctx.featuresById[featureId]
         for msgObj in featureObj.getMsgs():
@@ -544,6 +583,9 @@ def gen_cmd_send_h(ctx, out):
             out.write("\tarsdk_cmd_clear(&cmd);\n")
             out.write("\treturn res;\n")
             out.write("}\n\n")
+
+    # Include guard
+    out.write("\n#endif /* ARSDK_CMD_SEND_H_ */\n")
 
 #===============================================================================
 #===============================================================================

@@ -1,11 +1,16 @@
 # Copyright (c) 2020 Parrot Drones SAS
 
+from msghub_utils import get_pbuf_msg_num, service_id, service_name
+from .messages import ArsdkMessage
 from .internal.arsdkctrl import ArsdkCtrl
 from .internal.backend import BackendNet
 from .internal.device_handler import DeviceHandler
 from .internal.discovery import DiscoveryNet
 from .internal.observer import ArsdkObserver
 
+from arsdk import camera2_pb2 as camera2_msgs
+from google.protobuf import empty_pb2 as pbuf_empty
+from google.protobuf.message import Message
 
 class ArsdkItf:
     """Wrapper for a Arsdk client, with a net discovery and net backend.
@@ -62,6 +67,28 @@ class ArsdkItf:
         """
         self._device_handler.send_command(msg)
 
+    def send_custom_cmd(self, pbuf_msg):
+        """Send a custom protobuf command instance.
+
+        Example: itf.send_custom_cmd(
+            pbuf_msg=camera2_pb2.Command(
+                start_photo=camera2_pb2.Command.StartPhoto(
+                    camera_id=0
+                )
+            )
+        )
+        """
+        if isinstance(pbuf_msg, Message):
+            self.send(
+                ArsdkMessage.Generic.Custom_cmd(
+                    service_id(service_name(pbuf_msg)),
+                    get_pbuf_msg_num(pbuf_msg),
+                    pbuf_msg.SerializeToString()
+                )
+            )
+        else:
+            raise TypeError("CustomCmd: wrong argument type, only protobuf type is accepted")
+
     def register(self, bindings):
         """Register callbacks on specified events.
         Accepted binding formats:
@@ -81,3 +108,16 @@ class ArsdkItf:
          - msg.Mass_storage_id (int)
         """
         return self._observer.register(bindings)
+
+    def camera2_selected_fields(self, descriptor, keys):
+        """Create a dict suitable for the selected_fields field in camera2 pbuf messages.
+
+        For each field in 'keys', associate its protobuf index, as
+        given by 'descriptor', to an empty message.
+
+        """
+        _EMPTY_MSG = pbuf_empty.Empty()
+        return {
+            descriptor.fields_by_name[key].number: _EMPTY_MSG
+            for key in keys
+        }
