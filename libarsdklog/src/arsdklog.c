@@ -60,7 +60,6 @@ ULOG_DECLARE_TAG(ULOG_TAG);
 #	define SIZEOF_ARRAY(x) (sizeof((x)) / sizeof((x)[0]))
 #endif
 
-
 /**
  * Binary header for all v3 logs, followed by the event payload.
  */
@@ -78,48 +77,61 @@ struct arsdk_logger {
 	unsigned int instance_id;
 };
 
-#ifdef BUILD_LIBMSGHUB
-static bool is_generic_command_sensitive(const struct arsdk_cmd *cmd, bool ack)
+
+static bool is_generic_command_sensitive(const struct arsdk_cmd *cmd,
+		uint16_t *service_id, uint16_t *msg_num)
 {
 	struct arsdk_binary payload = {NULL, 0};
-	uint16_t service_id = 0;
-	uint16_t msg_num = 0;
 	int ret = 0;
 
-	if (ack)
+	switch (cmd->id) {
+	case ARSDK_ID_GENERIC_CUSTOM_CMD:
 		ret = arsdk_cmd_dec_Generic_Custom_cmd(
-			cmd, &service_id, &msg_num, &payload);
-	else
+			cmd, service_id, msg_num, &payload);
+		break;
+	case ARSDK_ID_GENERIC_CUSTOM_CMD_NON_ACK:
 		ret = arsdk_cmd_dec_Generic_Custom_cmd_non_ack(
-			cmd, &service_id, &msg_num, &payload);
-
-	if (ret < 0) {
-		ULOG_ERRNO("arsdk_cmd_dec_Generic_Custom_cmd", -ret);
+			cmd, service_id, msg_num, &payload);
+		break;
+	case ARSDK_ID_GENERIC_CUSTOM_EVT:
+		ret = arsdk_cmd_dec_Generic_Custom_evt(
+			cmd, service_id, msg_num, &payload);
+		break;
+	case ARSDK_ID_GENERIC_CUSTOM_EVT_NON_ACK:
+		ret = arsdk_cmd_dec_Generic_Custom_evt_non_ack(
+			cmd, service_id, msg_num, &payload);
+		break;
+	default:
+		ULOGE("Bad genereic custom cmd id (%d)", cmd->id);
 		return true; /* Do not log if error, in case it's sensitive */
 	}
 
-	if (service_id == msghub_utils_get_service_id(
+	if (ret < 0) {
+		ULOG_ERRNO("arsdk_cmd_dec_Generic_Custom_cmd id: %d", -ret,
+			   cmd->id);
+		return true; /* Do not log if error, in case it's sensitive */
+	}
+
+#ifdef BUILD_LIBMSGHUB
+	if (*service_id == msghub_utils_get_service_id(
 				  arsdk__security__command__descriptor.name))
-		if (msg_num == ARSDK__SECURITY__COMMAND__ID_REGISTER_APC_TOKEN)
+		if (*msg_num == ARSDK__SECURITY__COMMAND__ID_REGISTER_APC_TOKEN)
 			return true;
 
 	return false;
-}
 #else
-static bool is_generic_command_sensitive(const struct arsdk_cmd *cmd, bool ack)
-{
 	/* If we don't have access to libmsghub, consider any generic command
 	 * as sensitive */
-	(void)cmd;
-	(void)ack;
 	return true;
-}
 #endif /* BUILD_LIBMSGHUB */
+}
 
 static bool anonymize_command(const struct arsdk_cmd *in, struct arsdk_cmd *out)
 {
 	const char *hidden_stuff = "********";
 	int ret;
+	uint16_t service_id;
+	uint16_t msg_num;
 
 	switch (in->id) {
 	case ARSDK_ID_ARDRONE3_NETWORKSETTINGS_WIFISECURITY: {
@@ -191,6 +203,20 @@ static bool anonymize_command(const struct arsdk_cmd *in, struct arsdk_cmd *out)
 		break;
 	}
 
+	case ARSDK_ID_USER_STORAGE_FORMAT_WITH_ENCRYPTION: {
+		/* Decode command and replace password */
+		const char *label;
+		const char *password;
+		int32_t type;
+		ret = arsdk_cmd_dec_User_storage_Format_with_encryption(
+			in, &label, &password, &type);
+		if (ret < 0)
+			goto error_copy;
+		arsdk_cmd_enc_User_storage_Format_with_encryption(
+			out, label, hidden_stuff, type);
+		break;
+	}
+
 	case ARSDK_ID_USER_STORAGE_V2_ENCRYPTION_PASSWORD: {
 		/* Decode command and replace password */
 		uint8_t storage_id;
@@ -205,16 +231,36 @@ static bool anonymize_command(const struct arsdk_cmd *in, struct arsdk_cmd *out)
 		break;
 	}
 
+	case ARSDK_ID_USER_STORAGE_V2_FORMAT_WITH_ENCRYPTION: {
+		/* Decode command and replace password */
+		uint8_t storage_id;
+		const char *label;
+		const char *password;
+		int32_t type;
+		ret = arsdk_cmd_dec_User_storage_v2_Format_with_encryption(
+			in, &storage_id, &label, &password, &type);
+		if (ret < 0)
+			goto error_copy;
+		arsdk_cmd_enc_User_storage_v2_Format_with_encryption(
+			out, storage_id, label, hidden_stuff, type);
+		break;
+	}
+
 	/* TODO: Anonymize generic commands instead of filter */
 	case ARSDK_ID_GENERIC_CUSTOM_CMD:
-		if (is_generic_command_sensitive(in, true))
-			goto skip_log;
-		arsdk_cmd_copy(out, in);
-		break;
-
 	case ARSDK_ID_GENERIC_CUSTOM_CMD_NON_ACK:
-		if (is_generic_command_sensitive(in, false))
-			goto skip_log;
+	case ARSDK_ID_GENERIC_CUSTOM_EVT:
+	case ARSDK_ID_GENERIC_CUSTOM_EVT_NON_ACK:
+		if (is_generic_command_sensitive(in, &service_id, &msg_num)) {
+			/* Skip log */
+			ULOGD("Command %u.%u.%u not logged service: %d msg: %d",
+				in->prj_id,
+				in->cls_id,
+				in->cmd_id,
+				service_id,
+				msg_num);
+			return false;
+		}
 		arsdk_cmd_copy(out, in);
 		break;
 
@@ -233,13 +279,6 @@ error_copy:
 	      in->cmd_id);
 	arsdk_cmd_copy(out, in);
 	return true;
-
-skip_log:
-	ULOGD("Command %u.%u.%u not logged",
-	      in->prj_id,
-	      in->cls_id,
-	      in->cmd_id);
-	return false;
 }
 
 

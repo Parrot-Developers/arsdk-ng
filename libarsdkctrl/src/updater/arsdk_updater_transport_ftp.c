@@ -417,6 +417,7 @@ static const char *get_file_name(enum arsdk_device_type dev_type)
 		{ARSDK_DEVICE_TYPE_SKYCTRL_3, "mpp3_update.tar.gz"},
 		{ARSDK_DEVICE_TYPE_SKYCTRL_UA, "mppua_update.tar.gz"},
 		{ARSDK_DEVICE_TYPE_SKYCTRL_4, "mpp4_update.tar.gz"},
+		{ARSDK_DEVICE_TYPE_SKYCTRL_4_BLACK, "mpp4_update.tar.gz"},
 		{ARSDK_DEVICE_TYPE_JS, "jumpingsumo_update.plf"},
 		{ARSDK_DEVICE_TYPE_JS_EVO_LIGHT, "jumpingsumo_update.plf"},
 		{ARSDK_DEVICE_TYPE_JS_EVO_RACE, "jumpingsumo_update.plf"},

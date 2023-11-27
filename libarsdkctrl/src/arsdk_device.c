@@ -55,6 +55,7 @@ const char *arsdk_device_type_to_fld(enum arsdk_device_type dev_type)
 		{ARSDK_DEVICE_TYPE_SKYCTRL_3, "SkyController_3/"},
 		{ARSDK_DEVICE_TYPE_SKYCTRL_UA, "SkyController_UA/"},
 		{ARSDK_DEVICE_TYPE_SKYCTRL_4, "SkyController_4/"},
+		{ARSDK_DEVICE_TYPE_SKYCTRL_4_BLACK, "SkyController_4/"},
 		{ARSDK_DEVICE_TYPE_JS, "Jumping_Sumo/"},
 		{ARSDK_DEVICE_TYPE_JS_EVO_LIGHT, "Jumping_Night/"},
 		{ARSDK_DEVICE_TYPE_JS_EVO_RACE, "Jumping_Race/"},
@@ -942,7 +943,8 @@ static int resolution(struct arsdk_device_info *dev_info,
 		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_NG ||
 		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_3  ||
 		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_UA ||
-		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_4)
+		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_4 ||
+		    dev_type == ARSDK_DEVICE_TYPE_SKYCTRL_4_BLACK)
 			*host = "skycontroller";
 		else
 			*host = "drone";

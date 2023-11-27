@@ -63,6 +63,7 @@ const char *arsdk_device_type_str(enum arsdk_device_type val)
 	case ARSDK_DEVICE_TYPE_SKYCTRL_3: return "SKYCTRL_3";
 	case ARSDK_DEVICE_TYPE_SKYCTRL_UA: return "SKYCTRL_UA";
 	case ARSDK_DEVICE_TYPE_SKYCTRL_4: return "SKYCTRL_4";
+	case ARSDK_DEVICE_TYPE_SKYCTRL_4_BLACK: return "SKYCTRL_4_BLACK";
 	case ARSDK_DEVICE_TYPE_JS: return "JS";
 	case ARSDK_DEVICE_TYPE_JS_EVO_LIGHT: return "JS_EVO_LIGHT";
 	case ARSDK_DEVICE_TYPE_JS_EVO_RACE: return "JS_EVO_RACE";
